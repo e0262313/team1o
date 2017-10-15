@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<items version="2" >
+
+    <item
+        is-multidex="false"
+        jar="/Users/zhirong/Library/Android/sdk/extras/android/m2repository/com/android/support/support-annotations/26.0.0-alpha1/support-annotations-26.0.0-alpha1.jar"
+        jumboMode="false"
+        optimize="true"
+        revision="26.0.1"
+        sha1="023ee503b631f69511e335a061ea008f8da60f40">
+        <dex dex="/Users/zhirong/AndroidStudioProjects/DashPlayer/app/build/intermediates/pre-dexed/debug/support-annotations-26.0.0-alpha1_1f205865e551f1ab2ccc33efd48483434608f836.jar" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="/Users/zhirong/.android/build-cache/232c1deab9efdbe7153874622cf6f91c9bb94e06/output/jars/classes.jar"
+        jumboMode="false"
+        optimize="true"
+        revision="26.0.1"
+        sha1="47471eb19df288158b00b8d9cfa41bce7373f5cc">
+        <dex dex="/Users/zhirong/AndroidStudioProjects/DashPlayer/app/build/intermediates/pre-dexed/debug/classes_c271a4013beaf590a9ed212b48936b67a09a13d1.jar" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="/Users/zhirong/.android/build-cache/6275e2529c5661cfd1f927c830b6d5dc5a6c6c52/output/jars/classes.jar"
+        jumboMode="false"
+        optimize="true"
+        revision="26.0.1"
+        sha1="9935891f23923f39d002087085d9696568a9f657">
+        <dex dex="/Users/zhirong/AndroidStudioProjects/DashPlayer/app/build/intermediates/pre-dexed/debug/classes_9e2262356637dff7ed28888e7b91c498b8b19b5e.jar" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="/Users/zhirong/.android/build-cache/e69de209fe70dc4c3929b7d6ccc8c0110ef1940a/output/jars/classes.jar"
+        jumboMode="false"
+        optimize="true"
+        revision="26.0.1"
+        sha1="541a2ad68dc68aa49795821f8280b7624e6a0c9b">
+        <dex dex="/Users/zhirong/AndroidStudioProjects/DashPlayer/app/build/intermediates/pre-dexed/debug/classes_a70457ed9e6b0839675ec84ce75d5ebaebde47d3.jar" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="/Users/zhirong/.android/build-cache/1519df74d5495b6a2f2ea75af16341597f667ec3/output/jars/classes.jar"
+        jumboMode="false"
+        optimize="true"
+        revision="26.0.1"
+        sha1="fcd01fd11233459f546c437ec927e9b61bf7caf1">
+        <dex dex="/Users/zhirong/AndroidStudioProjects/DashPlayer/app/build/intermediates/pre-dexed/debug/classes_f53f5b3c0585822904e18a9b6c7652d6880556f3.jar" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="/Users/zhirong/.android/build-cache/68c1c1e2b452ef9390ddadc4d78e0f2fd339de63/output/jars/classes.jar"
+        jumboMode="false"
+        optimize="true"
+        revision="26.0.1"
+        sha1="2e92aa0163544a804a0b34f169ca61801770839a">
+        <dex dex="/Users/zhirong/AndroidStudioProjects/DashPlayer/app/build/intermediates/pre-dexed/debug/classes_7981d20832a85880d11345094974496bb4377b3a.jar" />
+    </item>
+    <item
+        is-multidex="true"
+        jar="/Users/zhirong/AndroidStudioProjects/DashPlayer/app/build/intermediates/incremental-classes/debug/instant-run-bootstrap.jar"
+        jumboMode="true"
+        optimize="true"
+        revision="26.0.1"
+        sha1="86a4e680a488f60d8f443390d4f8754af63ccba6">
+        <dex dex="/Users/zhirong/AndroidStudioProjects/DashPlayer/app/build/intermediates/transforms/dex/debug/folders/1000/10000/instant-run-bootstrap_78285e022a3d26c9a5df55b7282be868aee08af5/classes.dex" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="/Users/zhirong/.android/build-cache/ace32c20803ec4ac8cef2c2442c0e19ff26db711/output/jars/classes.jar"
+        jumboMode="false"
+        optimize="true"
+        revision="26.0.1"
+        sha1="18d31838aa4fcc768a8a0516e22cc13b94655d89">
+        <dex dex="/Users/zhirong/AndroidStudioProjects/DashPlayer/app/build/intermediates/pre-dexed/debug/classes_8b864d07bb4adc756a1cbada823c02a24618f2a7.jar" />
+    </item>
+    <item
+        is-multidex="true"
+        jar="/Users/zhirong/AndroidStudioProjects/DashPlayer/app/build/intermediates/incremental-runtime-classes/debug/instant-run.jar"
+        jumboMode="true"
+        optimize="true"
+        revision="26.0.1"
+        sha1="3be78ebc2706b2e1fe2f12d5726887a92d6c183b">
+        <dex dex="/Users/zhirong/AndroidStudioProjects/DashPlayer/app/build/intermediates/transforms/dex/debug/folders/1000/10000/instant-run_1d79537a9f96188bd9057ea2e998bd373a58cb5c/classes.dex" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="/Users/zhirong/.android/build-cache/ad5c5d863d196523ac05c6878e8fe7e33a31d7f1/output/jars/classes.jar"
+        jumboMode="false"
+        optimize="true"
+        revision="26.0.1"
+        sha1="8df0e365e40beb151bc42dee20817721a6cab7b0">
+        <dex dex="/Users/zhirong/AndroidStudioProjects/DashPlayer/app/build/intermediates/pre-dexed/debug/classes_5bc54ea2393a60e0e9a6aad04be7cd88fa52b43a.jar" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="/Users/zhirong/.android/build-cache/634db2eead571ec65ac8b0b859f52436edfdd8d2/output/jars/classes.jar"
+        jumboMode="false"
+        optimize="true"
+        revision="26.0.1"
+        sha1="d7c42c80f6509b9ea4db28ca7859ffae08ec5741">
+        <dex dex="/Users/zhirong/AndroidStudioProjects/DashPlayer/app/build/intermediates/pre-dexed/debug/classes_c7c71a471473b19edaa642bdc4a9f8acf878cd53.jar" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="/Users/zhirong/.android/build-cache/2e6b5ebb0365f211bff2034f2d24f5d8ee6039b9/output/jars/classes.jar"
+        jumboMode="false"
+        optimize="true"
+        revision="26.0.1"
+        sha1="88246166d5afb106f532f6e6deae683c66b42c89">
+        <dex dex="/Users/zhirong/AndroidStudioProjects/DashPlayer/app/build/intermediates/pre-dexed/debug/classes_39ed973f08fc6299a6408d77573af07a55d17430.jar" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="/Users/zhirong/.android/build-cache/b6e100418042649d6a132d444ab739d3d1c3e863/output/jars/classes.jar"
+        jumboMode="false"
+        optimize="true"
+        revision="26.0.1"
+        sha1="952944218ecedea1554a513dec0c14d570642843">
+        <dex dex="/Users/zhirong/AndroidStudioProjects/DashPlayer/app/build/intermediates/pre-dexed/debug/classes_125524c7bac965ceddd491a55053980eb915098e.jar" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="/Users/zhirong/Library/Android/sdk/extras/m2repository/com/android/support/constraint/constraint-layout-solver/1.0.0-alpha7/constraint-layout-solver-1.0.0-alpha7.jar"
+        jumboMode="false"
+        optimize="true"
+        revision="26.0.1"
+        sha1="439eeb5ffd54cbd18db0a6aea471e8356f19fc36">
+        <dex dex="/Users/zhirong/AndroidStudioProjects/DashPlayer/app/build/intermediates/pre-dexed/debug/constraint-layout-solver-1.0.0-alpha7_b7646721aff18e4a80ff7434fb4be15806b50328.jar" />
+    </item>
+
+</items>
