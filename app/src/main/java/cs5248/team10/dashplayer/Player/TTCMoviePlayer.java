@@ -1,525 +1,1432 @@
 package cs5248.team10.dashplayer.Player;
 
 /**
- * Created by zhirong on 10/10/17.
- * Ignore this file, copied over for easier viewing
+ * Created by zhirong on 1/11/17.
+ *
+ * References:
+ * - https://github.com/saki4510t/AudioVideoPlayerSample
  */
-
-/*
- * Copyright 2013 Google Inc. All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * Src: https://github.com/google/grafika/blob/master/src/com/android/grafika/MoviePlayer.java
- */
-
-import android.media.MediaCodec;
-import android.media.MediaExtractor;
-import android.media.MediaFormat;
-import android.os.Handler;
-import android.os.Message;
-import android.util.Log;
-import android.view.Surface;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.HashMap;
 
+import android.content.Context;
+import android.media.AudioFormat;
+import android.media.AudioManager;
+import android.media.AudioTrack;
+import android.media.MediaCodec;
+import android.media.MediaExtractor;
+import android.media.MediaFormat;
+import android.media.MediaMetadataRetriever;
+import android.media.MediaPlayer;
+import android.os.Environment;
+import android.text.TextUtils;
+import android.util.Log;
+import android.view.Surface;
 
-/**
- * Plays the video track from a movie file to a Surface.
- * <p>
- * TODO: needs more advanced shuttle controls (pause/resume, skip)
- */
-public class TTCMoviePlayer {
-    private static final String TAG = "MainActivity";
-    private static final boolean VERBOSE = false;
+public class TTCMoviePlayer extends MediaPlayer
+{
+    private static final boolean isLogging = true;
 
-    // Declare this here to reduce allocations.
-    private MediaCodec.BufferInfo mBufferInfo = new MediaCodec.BufferInfo();
+    private static final String TAG_STATIC = "TTCMoviePlayer:";
+    private final String TAG = TAG_STATIC + getClass().getSimpleName();
 
-    // May be set/read by different threads.
-    private volatile boolean mIsStopRequested;
+    private final FrameCallback mCallback;
 
-    private File mSourceFile;
-    private Surface mOutputSurface;
-    FrameCallback mFrameCallback;
-    private boolean mLoop;
-    private int mVideoWidth;
-    private int mVideoHeight;
+    private static final int TIMEOUT_USEC = 10000;    // 10 ms
 
-
-    /**
-     * Interface to be implemented by class that manages playback UI.
-     * <p>
-     * Callback methods will be invoked on the UI thread.
+    /*
+     * STATE_STOP => [prepare] => STATE_PREPARED [start]
+     * 	=> STATE_PLAYING => [seek] => STATE_PLAYING
+     * 		=> [pause] => STATE_PAUSED => [resume] => STATE_PLAYING
+     * 		=> [stop] => STATE_STOP
      */
-    public interface PlayerFeedback {
-        void playbackStopped();
-    }
+    private static final int STATE_STOP = 0;
+    private static final int STATE_PREPARED = 1;
+    private static final int STATE_PLAYING = 2;
+    private static final int STATE_PAUSED = 3;
 
+    // request code
+    private static final int REQ_NON = 0;
+    private static final int REQ_PREPARE = 1;
+    private static final int REQ_START = 2;
+    private static final int REQ_SEEK = 3;
+    private static final int REQ_STOP = 4;
+    private static final int REQ_PAUSE = 5;
+    private static final int REQ_RESUME = 6;
+    private static final int REQ_QUIT = 9;
 
-    /**
-     * Callback invoked when rendering video frames.  The MoviePlayer client must
-     * provide one of these.
-     */
-    public interface FrameCallback {
-        /**
-         * Called immediately before the frame is rendered.
-         * @param presentationTimeUsec The desired presentation time, in microseconds.
-         */
-        void preRender(long presentationTimeUsec);
+    //	private static final long EPS = (long)(1 / 240.0f * 1000000);	// 1/240 seconds[micro seconds]
 
-        /**
-         * Called immediately after the frame render call returns.  The frame may not have
-         * actually been rendered yet.
-         * TODO: is this actually useful?
-         */
-        void postRender();
+    protected MediaMetadataRetriever mMetadata;
+    private final Object mSync = new Object();
+    private volatile boolean mIsRunning;
+    private int mState;
+    private String mSourcePath;
+    private Long mDuration;
+    private int mRequest;
+    private int mRequestTime;
+    private boolean mCanPause = false;
 
-        /**
-         * Called after the last frame of a looped movie has been rendered.  This allows the
-         * callback to adjust its expectations of the next presentation time stamp.
-         */
-        void loopReset();
-    }
+    // for video playback
+    private final Object mVideoSync = new Object();
+    private final Surface mOutputSurface;
+    protected MediaExtractor mVideoMediaExtractor;
+    private MediaCodec mVideoMediaCodec;
+    private MediaCodec.BufferInfo mVideoBufferInfo;
+    private ByteBuffer[] mVideoInputBuffers;
+    private ByteBuffer[] mVideoOutputBuffers;
+    private long mVideoStartTime;
+    @SuppressWarnings("unused")
+    private long previousVideoPresentationTimeUs = -1;
+    private volatile int mVideoTrackIndex;
+    private boolean mVideoInputDone;
+    private boolean mVideoOutputDone;
+    private int mVideoWidth, mVideoHeight;
+    private int mBitrate;
+    private float mFrameRate;
+    private int mRotation;
 
+    // for audio playback
+    private final Object mAudioSync = new Object();
+    protected MediaExtractor mAudioMediaExtractor;
+    private MediaCodec mAudioMediaCodec;
+    private MediaCodec.BufferInfo mAudioBufferInfo;
+    private ByteBuffer[] mAudioInputBuffers;
+    private ByteBuffer[] mAudioOutputBuffers;
+    private long mAudioStartTime;
+    @SuppressWarnings("unused")
+    private long previousAudioPresentationTimeUs = -1;
+    private volatile int mAudioTrackIndex;
+    private boolean mAudioInputDone;
+    private boolean mAudioOutputDone;
+    private int mAudioChannels;
+    private int mAudioSampleRate;
+    private int mAudioInputBufSize;
+    private boolean mHasAudio;
+    private byte[] mAudioOutTempBuf;
+    private AudioTrack mAudioTrack;
+    private int mPercentage;
 
-    /**
-     * Constructs a MoviePlayer.
-     *
-     * @param sourceFile The video file to open.
-     * @param outputSurface The Surface where frames will be sent.
-     * @param frameCallback Callback object, used to pace output.
-     * @throws IOException
-     */
-    public TTCMoviePlayer(File sourceFile, Surface outputSurface, FrameCallback frameCallback)
-            throws IOException {
-        mSourceFile = sourceFile;
+    public TTCMoviePlayer(final Surface outputSurface, final FrameCallback callback) throws NullPointerException
+    {
+        if (isLogging) Log.wtf(TAG, "======= Constructor:");
+        if ((outputSurface == null) || (callback == null))
+            throw new NullPointerException("outputSurface and callback should not be null");
+
         mOutputSurface = outputSurface;
-        mFrameCallback = frameCallback;
-
-        // Pop the file open and pull out the video characteristics.
-        // TODO: consider leaving the extractor open.  Should be able to just seek back to
-        //       the start after each iteration of play.  Need to rearrange the API a bit --
-        //       currently play() is taking an all-in-one open+work+release approach.
-        MediaExtractor extractor = null;
-        try {
-            extractor = new MediaExtractor();
-            extractor.setDataSource(sourceFile.toString());
-            int trackIndex = selectTrack(extractor);
-            if (trackIndex < 0) {
-                throw new RuntimeException("No video track found in " + mSourceFile);
+        mCallback = callback;
+        mPercentage = 0;
+        new Thread(mMoviePlayerTask, TAG).start();
+        synchronized (mSync)
+        {
+            try
+            {
+                if (!mIsRunning) mSync.wait();
             }
-            extractor.selectTrack(trackIndex);
-
-            MediaFormat format = extractor.getTrackFormat(trackIndex);
-            mVideoWidth = format.getInteger(MediaFormat.KEY_WIDTH);
-            mVideoHeight = format.getInteger(MediaFormat.KEY_HEIGHT);
-            if (VERBOSE) {
-                Log.d(TAG, "Video size is " + mVideoWidth + "x" + mVideoHeight);
-            }
-        } finally {
-            if (extractor != null) {
-                extractor.release();
+            catch (final InterruptedException e)
+            {
             }
         }
     }
 
-    /**
-     * Returns the width, in pixels, of the video.
-     */
-    public int getVideoWidth() {
+    /**********************
+     * Start: Get Methods *
+     **********************/
+
+    public final int getWidth()
+    {
         return mVideoWidth;
     }
 
-    /**
-     * Returns the height, in pixels, of the video.
-     */
-    public int getVideoHeight() {
+    public final int getHeight()
+    {
         return mVideoHeight;
     }
 
-    /**
-     * Sets the loop mode.  If true, playback will loop forever.
-     */
-    public void setLoopMode(boolean loopMode) {
-        mLoop = loopMode;
+    public final int getBitRate()
+    {
+        return mBitrate;
+    }
+
+    public final float getFrameRate()
+    {
+        return mFrameRate;
     }
 
     /**
-     * Asks the player to stop.  Returns without waiting for playback to halt.
-     * <p>
-     * Called from arbitrary thread.
+     * @return 0, 90, 180, 270
      */
-    public void requestStop() {
-        mIsStopRequested = true;
+    public final int getRotation()
+    {
+        return mRotation;
     }
 
     /**
-     * Decodes the video stream, sending frames to the surface.
-     * <p>
-     * Does not return until video playback is complete, or we get a "stop" signal from
-     * frameCallback.
+     * get duration time as micro seconds
      */
-    public void play() throws IOException {
-        MediaExtractor extractor = null;
-        MediaCodec decoder = null;
+    public final int getDuration()
+    {
+        return mDuration != null ? mDuration.intValue() : null;
+    }
 
-        // The MediaExtractor error messages aren't very useful.  Check to see if the input
-        // file exists so we can throw a better one if it's not there.
-        if (!mSourceFile.canRead()) {
-            throw new FileNotFoundException("Unable to read " + mSourceFile);
+    /**
+     * get audio sampling rate[Hz]
+     */
+    public final int getSampleRate()
+    {
+        return mAudioSampleRate;
+    }
+
+    public final boolean hasAudio()
+    {
+        return mHasAudio;
+    }
+
+    public int getBufferPercentage() {
+        return mPercentage;
+    }
+
+    public boolean canPause() {
+        return mCanPause;
+    }
+
+    public boolean isPlaying()
+    {
+        return mState == STATE_PLAYING;
+    }
+
+    /********************
+     * End: Get Methods *
+     ********************/
+
+    /**
+     * Prepare to start the video
+     * Set the source and notify everyone
+     * @param src_movie - the movie source
+     */
+    public final void prepare(final String src_movie)
+    {
+        if (isLogging) Log.wtf(TAG, "======= prepare:");
+        synchronized (mSync)
+        {
+            mSourcePath = src_movie;
+            mRequest = REQ_PREPARE;
+            mSync.notifyAll();
         }
+    }
 
-        try {
-            extractor = new MediaExtractor();
-            extractor.setDataSource(mSourceFile.toString());
-            int trackIndex = selectTrack(extractor);
-            if (trackIndex < 0) {
-                throw new RuntimeException("No video track found in " + mSourceFile);
-            }
-            extractor.selectTrack(trackIndex);
-
-            MediaFormat format = extractor.getTrackFormat(trackIndex);
-
-            // Create a MediaCodec decoder, and configure it with the MediaFormat from the
-            // extractor.  It's very important to use the format from the extractor because
-            // it contains a copy of the CSD-0/CSD-1 codec-specific data chunks.
-            String mime = format.getString(MediaFormat.KEY_MIME);
-            decoder = MediaCodec.createDecoderByType(mime);
-            decoder.configure(format, mOutputSurface, null, 0);
-            decoder.start();
-
-            doExtract(extractor, trackIndex, decoder, mFrameCallback);
-        } finally {
-            // release everything we grabbed
-            if (decoder != null) {
-                decoder.stop();
-                decoder.release();
-                decoder = null;
-            }
-            if (extractor != null) {
-                extractor.release();
-                extractor = null;
-            }
+    /**
+     * Start playing video
+     * - called after prepare()
+     */
+    public final void start()
+    {
+if (isLogging) Log.wtf(TAG, "======= start with state: " + mState);
+        synchronized (mSync)
+        {
+            if (mState == STATE_PLAYING) return;
+            mRequest = REQ_START;
+            mSync.notifyAll();
         }
     }
 
     /**
-     * Selects the video track, if any.
+     * Seek to specific time frame
+     * if the frame is not a key frame, frame image will be broken
      *
-     * @return the track index, or -1 if no video track is found.
+     * @param newTime seek to new time[usec]
      */
-    private static int selectTrack(MediaExtractor extractor) {
-        // Select the first video track we find, ignore the rest.
-        int numTracks = extractor.getTrackCount();
-        for (int i = 0; i < numTracks; i++) {
-            MediaFormat format = extractor.getTrackFormat(i);
-            String mime = format.getString(MediaFormat.KEY_MIME);
-            if (mime.startsWith("video/")) {
-                if (VERBOSE) {
-                    Log.d(TAG, "Extractor selected track " + i + " (" + mime + "): " + format);
+    public final void seekTo(final int newTime)
+    {
+        if (isLogging) Log.wtf(TAG, "======= seek");
+        synchronized (mSync)
+        {
+            mRequest = REQ_SEEK;
+            mRequestTime = newTime;
+            mSync.notifyAll();
+        }
+    }
+
+    /**
+     * Stop playing video
+     */
+    public final void stop()
+    {
+        if (isLogging) Log.wtf(TAG, "======= stop:");
+        synchronized (mSync)
+        {
+            if (mState != STATE_STOP)
+            {
+                mRequest = REQ_STOP;
+                mSync.notifyAll();
+                try
+                {
+                    mSync.wait(50);
+                }
+                catch (final InterruptedException e)
+                {
+                }
+            }
+        }
+    }
+
+    /**
+     * Pause the video
+     * this function is un-implemented yet
+     */
+    public final void pause()
+    {
+if (isLogging) Log.wtf(TAG, "======= pause:");
+        synchronized (mSync)
+        {
+            if (mState == STATE_PAUSED) return;
+            mRequest = REQ_PAUSE;
+            mSync.notifyAll();
+        }
+    }
+
+    /**
+     * Resume from pausing
+     * this function is un-implemented yet
+     */
+    public final void resume()
+    {
+        if (isLogging) Log.wtf(TAG, "======= resume:");
+        synchronized (mSync)
+        {
+            mRequest = REQ_RESUME;
+            mSync.notifyAll();
+        }
+    }
+
+    /**
+     * End the video playing
+     */
+    public final void end()
+    {
+        if (isLogging) Log.wtf(TAG, "======= end:");
+        stop();
+        synchronized (mSync)
+        {
+            mRequest = REQ_QUIT;
+            mSync.notifyAll();
+        }
+    }
+
+    //--------------------------------------------------------------------------------
+    /**
+     * playback control task
+     */
+    private final Runnable mMoviePlayerTask = new Runnable()
+    {
+        @Override
+        public final void run()
+        {
+if (isLogging) Log.wtf(TAG, "======= mMoviePlayerTask:run");
+            boolean local_isRunning = false;
+            int local_req;
+            try
+            {
+                synchronized (mSync)
+                {
+Log.wtf(TAG, "~~~~ synchronized -- " + mRequest);
+                    local_isRunning = mIsRunning = true;
+                    mState = STATE_STOP;
+                    mRequest = REQ_NON;
+                    mRequestTime = -1;
+                    mSync.notifyAll();
+                }
+                for (; local_isRunning; )
+                {
+                    try
+                    {
+                        synchronized (mSync)
+                        {
+                            local_isRunning = mIsRunning;
+                            local_req = mRequest;
+                            mRequest = REQ_NON;
+                        }
+                        switch (mState)
+                        {
+                            case STATE_STOP:
+                                local_isRunning = processStop(local_req);
+                                break;
+                            case STATE_PREPARED:
+                                local_isRunning = processPrepared(local_req);
+                                break;
+                            case STATE_PLAYING:
+                                local_isRunning = processPlaying(local_req);
+                                break;
+                            case STATE_PAUSED:
+                                local_isRunning = processPaused(local_req);
+                                break;
+                        }
+                    }
+                    catch (final InterruptedException e)
+                    {
+                        break;
+                    }
+                    catch (final Exception e)
+                    {
+                        Log.e(TAG, "======= MoviePlayerTask:", e);
+                        break;
+                    }
+                }
+            }
+            finally
+            {
+                if (isLogging)
+                    Log.wtf(TAG, "======= player task finished:local_isRunning=" + local_isRunning);
+                handleStop();
+            }
+        }
+    };
+
+
+//11-05 23:27:55.756 18178-19364/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= handleInputVideo
+//11-05 23:27:55.716 18178-19364/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= internal_process_input:presentationTimeUs=8208333
+//        11-05 23:27:55.717 18178-19364/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= handleOutputVideo:
+//        11-05 23:27:55.722 18178-19364/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= adjustPresentationTime
+//11-05 23:27:55.737 18178-19365/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= handleInputAudio
+//11-05 23:27:55.738 18178-19365/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= internal_process_input:presentationTimeUs=8080544
+//        11-05 23:27:55.741 18178-19365/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= handleOutputAudio:
+//        11-05 23:27:55.744 18178-19365/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= internal_write_audio
+//11-05 23:27:55.745 18178-19365/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= adjustPresentationTime
+
+
+    //--------------------------------------------------------------------------------
+    /**
+     * video playback task
+     */
+    private final Runnable mVideoTask = new Runnable()
+    {
+        @Override
+        public void run()
+        {
+if (isLogging) Log.wtf(TAG, "======= mVideoTask:run");
+            for (; mIsRunning && !mVideoInputDone && !mVideoOutputDone; )
+            {
+                try
+                {
+                    // check that it is not paused
+                    if (mState != STATE_PAUSED)
+                    {
+                        if (!mVideoInputDone)
+                        {
+                            handleInputVideo();
+                        }
+                        if (!mVideoOutputDone)
+                        {
+                            handleOutputVideo(mCallback);
+                        }
+                    }
+                }
+                catch (final Exception e)
+                {
+                    Log.e(TAG, "======= VideoTask:", e);
+                    break;
+                }
+            }
+            if (isLogging) Log.wtf(TAG, "======= VideoTask:finished");
+            synchronized (mSync)
+            {
+                mVideoInputDone = mVideoOutputDone = true;
+                mSync.notifyAll();
+            }
+        }
+    };
+
+    //--------------------------------------------------------------------------------
+    /**
+     * audio playback task
+     */
+    private final Runnable mAudioTask = new Runnable()
+    {
+        @Override
+        public void run()
+        {
+if (isLogging) Log.wtf(TAG, "======= mAudioTask:run");
+            for (; mIsRunning && !mAudioInputDone && !mAudioOutputDone; )
+            {
+                try
+                {
+                    if (!mAudioInputDone)
+                    {
+                        handleInputAudio();
+                    }
+                    if (!mAudioOutputDone)
+                    {
+                        handleOutputAudio(mCallback);
+                    }
+                }
+                catch (final Exception e)
+                {
+                    Log.e(TAG, "======= VideoTask:", e);
+                    break;
+                }
+            } // end of for
+            if (isLogging) Log.wtf(TAG, "======= AudioTask:finished");
+            synchronized (mSync)
+            {
+                mAudioInputDone = mAudioOutputDone = true;
+                mSync.notifyAll();
+            }
+        }
+    };
+
+    //--------------------------------------------------------------------------------
+
+    /**
+     * @param req
+     * @return
+     * @throws InterruptedException
+     * @throws IOException
+     */
+    private final boolean processStop(final int req) throws InterruptedException, IOException
+    {
+if (isLogging) Log.wtf(TAG, "======= processStop with req ==> " + req);
+        boolean local_isRunning = true;
+        switch (req)
+        {
+            case REQ_PREPARE:
+                handlePrepare(mSourcePath);
+                break;
+            case REQ_START:
+            case REQ_PAUSE:
+            case REQ_RESUME:
+            case REQ_QUIT:
+                local_isRunning = false;
+                break;
+            //		case REQ_SEEK:
+            //		case REQ_STOP:
+            default:
+                synchronized (mSync)
+                {
+                    mSync.wait();
+                }
+                break;
+        }
+        synchronized (mSync)
+        {
+            local_isRunning &= mIsRunning;
+        }
+        return local_isRunning;
+    }
+
+    /**
+     * @param req
+     * @return
+     * @throws InterruptedException
+     */
+    private final boolean processPrepared(final int req) throws InterruptedException
+    {
+if (isLogging) Log.wtf(TAG, "======= processPrepared");
+        boolean local_isRunning = true;
+        mCanPause = true;
+        switch (req)
+        {
+            case REQ_START:
+                handleStart();
+                break;
+            case REQ_PAUSE:
+            case REQ_RESUME:
+                throw new IllegalStateException("invalid state:" + mState);
+            case REQ_STOP:
+                handleStop();
+                break;
+            case REQ_QUIT:
+                local_isRunning = false;
+                break;
+            //		case REQ_PREPARE:
+            //		case REQ_SEEK:
+            default:
+                synchronized (mSync)
+                {
+                    mSync.wait();
+                }
+                break;
+        } // end of switch (req)
+        synchronized (mSync)
+        {
+            local_isRunning &= mIsRunning;
+        }
+        return local_isRunning;
+    }
+
+    /**
+     * @param req
+     * @return
+     */
+    private final boolean processPlaying(final int req)
+    {
+if (isLogging) Log.wtf(TAG, "======= processPlaying");
+        boolean local_isRunning = true;
+        switch (req)
+        {
+            case REQ_PREPARE:
+            case REQ_START:
+            case REQ_RESUME:
+                throw new IllegalStateException("invalid state:" + mState);
+            case REQ_SEEK:
+                handleSeek(mRequestTime);
+                break;
+            case REQ_STOP:
+                handleStop();
+                break;
+            case REQ_PAUSE:
+                handlePause();
+                break;
+            case REQ_QUIT:
+                local_isRunning = false;
+                break;
+            default:
+                handleLoop();
+                break;
+        }
+        synchronized (mSync)
+        {
+            local_isRunning &= mIsRunning;
+        }
+        return local_isRunning;
+    }
+
+    /**
+     * @param req
+     * @return
+     * @throws InterruptedException
+     */
+    private final boolean processPaused(final int req) throws InterruptedException
+    {
+if (isLogging) Log.wtf(TAG, "======= processPaused");
+        boolean local_isRunning = true;
+        switch (req)
+        {
+            case REQ_PREPARE:
+            case REQ_START:
+//                throw new IllegalStateException("invalid state:" + mState);
+            case REQ_SEEK:
+                handleSeek(mRequestTime);
+                break;
+            case REQ_STOP:
+                handleStop();
+                break;
+            case REQ_RESUME:
+                handleResume();
+                break;
+            case REQ_QUIT:
+                local_isRunning = false;
+                break;
+            //		case REQ_PAUSE:
+            default:
+                synchronized (mSync)
+                {
+                    mSync.wait();
+                }
+                break;
+        } // end of switch (req)
+        synchronized (mSync)
+        {
+            local_isRunning &= mIsRunning;
+        }
+        return local_isRunning;
+    }
+
+    /**
+     * @param source_file
+     * @throws IOException
+     */
+    private final void handlePrepare(final String source_file) throws IOException
+    {
+if (isLogging) Log.wtf(TAG, "======= handlePrepare:" + source_file);
+        synchronized (mSync)
+        {
+            if (mState != STATE_STOP)
+            {
+                throw new RuntimeException("invalid state:" + mState);
+            }
+        }
+
+        File file = new File(source_file);
+
+        FileInputStream fileInputStream;
+        try
+        {
+            fileInputStream = new FileInputStream(file);
+        }
+        catch (FileNotFoundException e) {
+            throw new FileNotFoundException("Stream: Unable to read " + file.getPath() + " | exist?: "
+                    + file.exists() + " or isFile?: " + file.isFile() + " or canRead?: " + file.canRead());
+        }
+
+        mVideoTrackIndex = mAudioTrackIndex = -1;
+        mMetadata = new MediaMetadataRetriever();
+
+//        mMetadata.setDataSource(source_file, new HashMap<String, String>());
+        mMetadata.setDataSource(fileInputStream.getFD());
+        fileInputStream.close();
+
+        updateMovieInfo();
+        // preparation for video playback
+        mVideoTrackIndex = internal_prepare_video(source_file);
+        // preparation for audio playback
+        mAudioTrackIndex = internal_prepare_audio(source_file);
+        mHasAudio = mAudioTrackIndex >= 0;
+        if ((mVideoTrackIndex < 0) && (mAudioTrackIndex < 0))
+        {
+            throw new RuntimeException("No video and audio track found in " + source_file);
+        }
+        synchronized (mSync)
+        {
+            mState = STATE_PREPARED;
+        }
+        mCallback.onPrepared();
+    }
+
+    /**
+     * @param source_path
+     * @return first video track index, -1 if not found
+     */
+    protected int internal_prepare_video(final String source_path)
+    {
+if (isLogging) Log.wtf(TAG, "======= internal_prepare_video");        
+        int trackindex = -1;
+        mVideoMediaExtractor = new MediaExtractor();
+        try
+        {
+            mVideoMediaExtractor.setDataSource(source_path);
+            trackindex = selectTrack(mVideoMediaExtractor, "video/");
+            if (trackindex >= 0)
+            {
+                mVideoMediaExtractor.selectTrack(trackindex);
+                final MediaFormat format = mVideoMediaExtractor.getTrackFormat(trackindex);
+                mVideoWidth = format.getInteger(MediaFormat.KEY_WIDTH);
+                mVideoHeight = format.getInteger(MediaFormat.KEY_HEIGHT);
+                mDuration = format.getLong(MediaFormat.KEY_DURATION);
+
+                if (isLogging)
+                    Log.wtf(TAG, String.format("format:size(%d,%d),duration=%d,bps=%d,framerate=%f,rotation=%d", mVideoWidth, mVideoHeight, mDuration, mBitrate, mFrameRate, mRotation));
+            }
+        }
+        catch (final IOException e)
+        {
+        }
+        return trackindex;
+    }
+
+    /**
+     * @param source_file
+     * @return first audio track index, -1 if not found
+     */
+    protected int internal_prepare_audio(final String source_file)
+    {
+if (isLogging) Log.wtf(TAG, "======= internal_prepare_audio");
+        int trackindex = -1;
+        mAudioMediaExtractor = new MediaExtractor();
+        try
+        {
+            mAudioMediaExtractor.setDataSource(source_file);
+            trackindex = selectTrack(mAudioMediaExtractor, "audio/");
+            if (trackindex >= 0)
+            {
+                mAudioMediaExtractor.selectTrack(trackindex);
+                final MediaFormat format = mAudioMediaExtractor.getTrackFormat(trackindex);
+                mAudioChannels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+                mAudioSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+                final int min_buf_size = AudioTrack.getMinBufferSize(mAudioSampleRate, (mAudioChannels == 1 ? AudioFormat.CHANNEL_OUT_MONO : AudioFormat.CHANNEL_OUT_STEREO), AudioFormat.ENCODING_PCM_16BIT);
+                final int max_input_size = format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE);
+                mAudioInputBufSize = min_buf_size > 0 ? min_buf_size * 4 : max_input_size;
+                if (mAudioInputBufSize > max_input_size) mAudioInputBufSize = max_input_size;
+                final int frameSizeInBytes = mAudioChannels * 2;
+                mAudioInputBufSize = (mAudioInputBufSize / frameSizeInBytes) * frameSizeInBytes;
+                if (isLogging)
+                    Log.wtf(TAG, String.format("getMinBufferSize=%d,max_input_size=%d,mAudioInputBufSize=%d", min_buf_size, max_input_size, mAudioInputBufSize));
+                //
+                mAudioTrack = new AudioTrack(AudioManager.STREAM_MUSIC, mAudioSampleRate, (mAudioChannels == 1 ? AudioFormat.CHANNEL_OUT_MONO : AudioFormat.CHANNEL_OUT_STEREO), AudioFormat.ENCODING_PCM_16BIT, mAudioInputBufSize, AudioTrack.MODE_STREAM);
+                try
+                {
+                    mAudioTrack.play();
+                }
+                catch (final Exception e)
+                {
+                    Log.e(TAG, "======= failed to start audio track playing", e);
+                    mAudioTrack.release();
+                    mAudioTrack = null;
+                }
+            }
+        }
+        catch (final IOException e)
+        {
+        }
+        return trackindex;
+    }
+
+    protected void updateMovieInfo()
+    {
+if (isLogging) Log.wtf(TAG, "======= updateMovieInfo");
+        mVideoWidth = mVideoHeight = mRotation = mBitrate = 0;
+        mDuration = 0L;
+        mFrameRate = 0;
+        String value = mMetadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH);
+        if (!TextUtils.isEmpty(value))
+        {
+            mVideoWidth = Integer.parseInt(value);
+        }
+        value = mMetadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT);
+        if (!TextUtils.isEmpty(value))
+        {
+            mVideoHeight = Integer.parseInt(value);
+        }
+        value = mMetadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
+        if (!TextUtils.isEmpty(value))
+        {
+            mRotation = Integer.parseInt(value);
+        }
+        value = mMetadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE);
+        if (!TextUtils.isEmpty(value))
+        {
+            mBitrate = Integer.parseInt(value);
+        }
+        value = mMetadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+        if (!TextUtils.isEmpty(value))
+        {
+            mDuration = Long.parseLong(value) * 1000;
+        }
+    }
+
+    private final void handleStart()
+    {
+if (isLogging) Log.wtf(TAG, "======= handleStart");
+        synchronized (mSync)
+        {
+            if (mState != STATE_PREPARED) throw new RuntimeException("invalid state:" + mState);
+            mState = STATE_PLAYING;
+        }
+        if (mRequestTime > 0)
+        {
+            handleSeek(mRequestTime);
+        }
+        previousVideoPresentationTimeUs = previousAudioPresentationTimeUs = -1;
+        mVideoInputDone = mVideoOutputDone = true;
+        Thread videoThread = null, audioThread = null;
+        if (mVideoTrackIndex >= 0)
+        {
+            final MediaCodec codec = internal_start_video(mVideoMediaExtractor, mVideoTrackIndex);
+            if (codec != null)
+            {
+                mVideoMediaCodec = codec;
+                mVideoBufferInfo = new MediaCodec.BufferInfo();
+                mVideoInputBuffers = codec.getInputBuffers();
+                mVideoOutputBuffers = codec.getOutputBuffers();
+            }
+            mVideoInputDone = mVideoOutputDone = false;
+            videoThread = new Thread(mVideoTask, "VideoTask");
+        }
+        mAudioInputDone = mAudioOutputDone = true;
+        if (mAudioTrackIndex >= 0)
+        {
+            final MediaCodec codec = internal_start_audio(mAudioMediaExtractor, mAudioTrackIndex);
+            if (codec != null)
+            {
+                mAudioMediaCodec = codec;
+                mAudioBufferInfo = new MediaCodec.BufferInfo();
+                mAudioInputBuffers = codec.getInputBuffers();
+                mAudioOutputBuffers = codec.getOutputBuffers();
+            }
+            mAudioInputDone = mAudioOutputDone = false;
+            audioThread = new Thread(mAudioTask, "AudioTask");
+        }
+        if (videoThread != null) videoThread.start();
+        if (audioThread != null) audioThread.start();
+    }
+
+    /**
+     * @param media_extractor
+     * @param trackIndex
+     * @return
+     */
+    protected MediaCodec internal_start_video(final MediaExtractor media_extractor,
+                                              final int trackIndex)
+    {
+if (isLogging) Log.wtf(TAG, "======= internal_start_video for track - " + trackIndex);
+        MediaCodec codec = null;
+        if (trackIndex >= 0)
+        {
+            final MediaFormat format = media_extractor.getTrackFormat(trackIndex);
+            final String mime = format.getString(MediaFormat.KEY_MIME);
+            try
+            {
+                codec = MediaCodec.createDecoderByType(mime);
+                codec.configure(format, mOutputSurface, null, 0);
+                codec.start();
+                if (isLogging) Log.wtf(TAG, "======= internal_start_video:codec started");
+            }
+            catch (IOException e)
+            {
+                e.printStackTrace();
+            }
+        }
+        return codec;
+    }
+
+    /**
+     * @param media_extractor
+     * @param trackIndex
+     * @return
+     */
+    protected MediaCodec internal_start_audio(final MediaExtractor media_extractor,
+                                              final int trackIndex)
+    {
+if (isLogging) Log.wtf(TAG, "======= internal_start_audio for track - " + trackIndex);
+        MediaCodec codec = null;
+        if (trackIndex >= 0)
+        {
+            final MediaFormat format = media_extractor.getTrackFormat(trackIndex);
+            final String mime = format.getString(MediaFormat.KEY_MIME);
+            try
+            {
+                codec = MediaCodec.createDecoderByType(mime);
+                codec.configure(format, null, null, 0);
+                codec.start();
+                if (isLogging) Log.wtf(TAG, "======= internal_start_audio:codec started");
+                //
+                final ByteBuffer[] buffers = codec.getOutputBuffers();
+                int sz = buffers[0].capacity();
+                if (sz <= 0) sz = mAudioInputBufSize;
+                if (isLogging) Log.wtf(TAG, "======= AudioOutputBufSize:" + sz);
+                mAudioOutTempBuf = new byte[sz];
+            }
+            catch (IOException e)
+            {
+                e.printStackTrace();
+            }
+        }
+        return codec;
+    }
+
+    private final void handleSeek(final int newTime)
+    {
+if (isLogging) Log.wtf(TAG, "======= handleSeek from time -> " + newTime);
+        if (newTime < 0) return;
+
+        if (mVideoTrackIndex >= 0)
+        {
+            mVideoMediaExtractor.seekTo(newTime, MediaExtractor.SEEK_TO_CLOSEST_SYNC);
+            mVideoMediaExtractor.advance();
+        }
+        if (mAudioTrackIndex >= 0)
+        {
+            mAudioMediaExtractor.seekTo(newTime, MediaExtractor.SEEK_TO_CLOSEST_SYNC);
+            mAudioMediaExtractor.advance();
+        }
+        mRequestTime = -1;
+    }
+
+    private final void handleLoop()
+    {
+if (isLogging) Log.wtf(TAG, "======= handleLoop");
+        synchronized (mSync)
+        {
+            try
+            {
+                mSync.wait();
+            }
+            catch (final InterruptedException e)
+            {
+            }
+        }
+        if (mVideoInputDone && mVideoOutputDone && mAudioInputDone && mAudioOutputDone)
+        {
+            if (isLogging) Log.wtf(TAG, "======= Reached EOS, looping check");
+            handleStop();
+        }
+    }
+
+    /**
+     * @param codec
+     * @param extractor
+     * @param inputBuffers
+     * @param presentationTimeUs
+     */
+    protected boolean internal_process_input(final MediaCodec codec, final MediaExtractor extractor,
+                                             final ByteBuffer[] inputBuffers,
+                                             final long presentationTimeUs)
+    {
+if (isLogging) Log.d(TAG, "======= internal_process_input:presentationTimeUs=" + presentationTimeUs);
+        boolean result = true;
+        while (mIsRunning)
+        {
+            final int inputBufIndex = codec.dequeueInputBuffer(TIMEOUT_USEC);
+            if (inputBufIndex == MediaCodec.INFO_TRY_AGAIN_LATER) break;
+            if (inputBufIndex >= 0)
+            {
+                final int size = extractor.readSampleData(inputBuffers[inputBufIndex], 0);
+                if (size > 0)
+                {
+                    codec.queueInputBuffer(inputBufIndex, 0, size, presentationTimeUs, 0);
+                }
+                result = extractor.advance();    // return false if no data is available
+                break;
+            }
+        }
+        return result;
+    }
+
+    private final void handleInputVideo()
+    {
+if (isLogging) Log.d(TAG, "======= handleInputVideo");
+        final long presentationTimeUs = mVideoMediaExtractor.getSampleTime();
+/*		if (presentationTimeUs < previousVideoPresentationTimeUs) {
+            presentationTimeUs += previousVideoPresentationTimeUs - presentationTimeUs; // + EPS;
+    	}
+    	previousVideoPresentationTimeUs = presentationTimeUs; */
+        final boolean b = internal_process_input(mVideoMediaCodec, mVideoMediaExtractor, mVideoInputBuffers, presentationTimeUs);
+        if (!b)
+        {
+            if (isLogging) Log.i(TAG, "======= video track input reached EOS");
+            while (mIsRunning)
+            {
+                final int inputBufIndex = mVideoMediaCodec.dequeueInputBuffer(TIMEOUT_USEC);
+                if (inputBufIndex >= 0)
+                {
+                    mVideoMediaCodec.queueInputBuffer(inputBufIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    if (isLogging) Log.wtf(TAG, "======= sent input EOS:" + mVideoMediaCodec);
+                    break;
+                }
+            }
+            synchronized (mSync)
+            {
+                mVideoInputDone = true;
+                mSync.notifyAll();
+            }
+        }
+    }
+
+    /**
+     * @param frameCallback
+     */
+    private final void handleOutputVideo(final FrameCallback frameCallback)
+    {
+if (isLogging) Log.d(TAG, "======= handleOutputVideo:");
+        while (mIsRunning && !mVideoOutputDone)
+        {
+            final int decoderStatus = mVideoMediaCodec.dequeueOutputBuffer(mVideoBufferInfo, TIMEOUT_USEC);
+            if (decoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER)
+            {
+                return;
+            }
+            else if (decoderStatus == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED)
+            {
+                mVideoOutputBuffers = mVideoMediaCodec.getOutputBuffers();
+                if (isLogging) Log.wtf(TAG, "======= INFO_OUTPUT_BUFFERS_CHANGED:");
+            }
+            else if (decoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED)
+            {
+                final MediaFormat newFormat = mVideoMediaCodec.getOutputFormat();
+                if (isLogging) Log.wtf(TAG, "======= video decoder output format changed: " + newFormat);
+            }
+            else if (decoderStatus < 0)
+            {
+                throw new RuntimeException("unexpected result from video decoder.dequeueOutputBuffer: " + decoderStatus);
+            }
+            else
+            { // decoderStatus >= 0
+                boolean doRender = false;
+                if (mVideoBufferInfo.size > 0)
+                {
+//                    doRender = (mVideoBufferInfo.size != 0) && !internal_write_video(mVideoOutputBuffers[decoderStatus], 0, mVideoBufferInfo.size, mVideoBufferInfo.presentationTimeUs);
+                    doRender = (mVideoBufferInfo.size != 0);
+                    if (doRender)
+                    {
+                        if (!frameCallback.onFrameAvailable(mVideoBufferInfo.presentationTimeUs))
+                            mVideoStartTime = adjustPresentationTime(mVideoSync, mVideoStartTime, mVideoBufferInfo.presentationTimeUs);
+                    }
+                }
+                mVideoMediaCodec.releaseOutputBuffer(decoderStatus, doRender);
+                // check for the end of video stream
+                if ((mVideoBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0)
+                {
+                    if (isLogging) Log.wtf(TAG, "======= video:output EOS");
+                    synchronized (mSync)
+                    {
+                        mVideoOutputDone = true;
+                        mSync.notifyAll();
+                    }
+                }
+            }
+        }
+    }
+
+//    /**
+//     * @param buffer
+//     * @param offset
+//     * @param size
+//     * @param presentationTimeUs
+//     * @return if return false, automatically adjust frame rate
+//     */
+//    protected boolean internal_write_video(final ByteBuffer buffer, final int offset,
+//                                           final int size, final long presentationTimeUs)
+//    {
+//if (isLogging) Log.wtf(TAG, "======= internal_write_video");
+//        return false;
+//    }
+
+    private final void handleInputAudio()
+    {
+if (isLogging) Log.d(TAG, "======= handleInputAudio");
+        final long presentationTimeUs = mAudioMediaExtractor.getSampleTime();
+/*		if (presentationTimeUs < previousAudioPresentationTimeUs) {
+            presentationTimeUs += previousAudioPresentationTimeUs - presentationTimeUs; //  + EPS;
+    	}
+    	previousAudioPresentationTimeUs = presentationTimeUs; */
+        final boolean b = internal_process_input(mAudioMediaCodec, mAudioMediaExtractor, mAudioInputBuffers, presentationTimeUs);
+        if (!b)
+        {
+            if (isLogging) Log.i(TAG, "======= audio track input reached EOS");
+            while (mIsRunning)
+            {
+                final int inputBufIndex = mAudioMediaCodec.dequeueInputBuffer(TIMEOUT_USEC);
+                if (inputBufIndex >= 0)
+                {
+                    mAudioMediaCodec.queueInputBuffer(inputBufIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    if (isLogging) Log.wtf(TAG, "======= sent input EOS:" + mAudioMediaCodec);
+                    break;
+                }
+            }
+            synchronized (mSync)
+            {
+                mAudioInputDone = true;
+                mSync.notifyAll();
+            }
+        }
+    }
+
+    private final void handleOutputAudio(final FrameCallback frameCallback)
+    {
+if (isLogging) Log.d(TAG, "======= handleOutputAudio:");
+        while (mIsRunning && !mAudioOutputDone)
+        {
+            final int decoderStatus = mAudioMediaCodec.dequeueOutputBuffer(mAudioBufferInfo, TIMEOUT_USEC);
+            if (decoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER)
+            {
+                return;
+            }
+            else if (decoderStatus == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED)
+            {
+                mAudioOutputBuffers = mAudioMediaCodec.getOutputBuffers();
+                if (isLogging) Log.wtf(TAG, "======= INFO_OUTPUT_BUFFERS_CHANGED:");
+            }
+            else if (decoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED)
+            {
+                final MediaFormat newFormat = mAudioMediaCodec.getOutputFormat();
+                if (isLogging) Log.wtf(TAG, "======= audio decoder output format changed: " + newFormat);
+            }
+            else if (decoderStatus < 0)
+            {
+                throw new RuntimeException("unexpected result from audio decoder.dequeueOutputBuffer: " + decoderStatus);
+            }
+            else
+            { // decoderStatus >= 0
+                if (mAudioBufferInfo.size > 0)
+                {
+                    internal_write_audio(mAudioOutputBuffers[decoderStatus], 0, mAudioBufferInfo.size);
+                    if (!frameCallback.onFrameAvailable(mAudioBufferInfo.presentationTimeUs))
+                        mAudioStartTime = adjustPresentationTime(mAudioSync, mAudioStartTime, mAudioBufferInfo.presentationTimeUs);
+                }
+                mAudioMediaCodec.releaseOutputBuffer(decoderStatus, false);
+                if ((mAudioBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0)
+                {
+                    if (isLogging) Log.wtf(TAG, "======= audio:output EOS");
+                    synchronized (mSync)
+                    {
+                        mAudioOutputDone = true;
+                        mSync.notifyAll();
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * @param buffer
+     * @param offset
+     * @param size
+     * @return ignored
+     */
+    protected void internal_write_audio(final ByteBuffer buffer, final int offset,
+                                           final int size)
+    {
+if (isLogging) Log.d(TAG, "======= internal_write_audio");
+        if (mAudioOutTempBuf.length < size)
+        {
+            mAudioOutTempBuf = new byte[size];
+        }
+        buffer.position(offset);
+        buffer.get(mAudioOutTempBuf, 0, size);
+        buffer.clear();
+        if (mAudioTrack != null) mAudioTrack.write(mAudioOutTempBuf, 0, size);
+    }
+
+    /**
+     * adjusting frame rate
+     *
+     * @param sync
+     * @param startTime
+     * @param presentationTimeUs
+     * @return startTime
+     */
+    protected long adjustPresentationTime(final Object sync, final long startTime,
+                                          final long presentationTimeUs)
+    {
+if (isLogging) Log.d(TAG, "======= adjustPresentationTime | start time = " + startTime + " and presentationTimeUs = " + presentationTimeUs);
+        if (startTime > 0)
+        {
+            for (long t = presentationTimeUs - (System.nanoTime() / 1000 - startTime); t > 0; t = presentationTimeUs - (System.nanoTime() / 1000 - startTime))
+            {
+                synchronized (sync)
+                {
+                    try
+                    {
+                        sync.wait(t / 1000, (int) ((t % 1000) * 1000));
+                    }
+                    catch (final InterruptedException e)
+                    {
+                    }
+                    if ((mState == REQ_STOP) || (mState == REQ_QUIT)) break;
+                }
+            }
+            return startTime;
+        }
+        else
+        {
+            return System.nanoTime() / 1000;
+        }
+    }
+
+    private final void handleStop()
+    {
+if (isLogging) Log.wtf(TAG, "======= handleStop:");
+        synchronized (mVideoTask)
+        {
+            internal_stop_video();
+            mVideoTrackIndex = -1;
+        }
+        synchronized (mAudioTask)
+        {
+            internal_stop_audio();
+            mAudioTrackIndex = -1;
+        }
+        if (mVideoMediaCodec != null)
+        {
+            mVideoMediaCodec.stop();
+            mVideoMediaCodec.release();
+            mVideoMediaCodec = null;
+        }
+        if (mAudioMediaCodec != null)
+        {
+            mAudioMediaCodec.stop();
+            mAudioMediaCodec.release();
+            mAudioMediaCodec = null;
+        }
+        if (mVideoMediaExtractor != null)
+        {
+            mVideoMediaExtractor.release();
+            mVideoMediaExtractor = null;
+        }
+        if (mAudioMediaExtractor != null)
+        {
+            mAudioMediaExtractor.release();
+            mAudioMediaExtractor = null;
+        }
+        mVideoBufferInfo = mAudioBufferInfo = null;
+        mVideoInputBuffers = mVideoOutputBuffers = null;
+        mAudioInputBuffers = mAudioOutputBuffers = null;
+        if (mMetadata != null)
+        {
+            mMetadata.release();
+            mMetadata = null;
+        }
+        synchronized (mSync)
+        {
+            mVideoOutputDone = mVideoInputDone = mAudioOutputDone = mAudioInputDone = true;
+            mState = STATE_STOP;
+        }
+        mCallback.onFinished();
+    }
+
+    protected void internal_stop_video()
+    {
+        if (isLogging) Log.wtf(TAG, "======= internal_stop_video:");
+    }
+
+    protected void internal_stop_audio()
+    {
+        if (isLogging) Log.wtf(TAG, "======= internal_stop_audio:");
+        if (mAudioTrack != null)
+        {
+            if (mAudioTrack.getState() != AudioTrack.STATE_UNINITIALIZED) mAudioTrack.stop();
+            mAudioTrack.release();
+            mAudioTrack = null;
+        }
+        mAudioOutTempBuf = null;
+    }
+
+    private final void handlePause()
+    {
+if (isLogging) Log.wtf(TAG, "======= handlePause:");
+        synchronized (mSync)
+        {
+            mState = STATE_PAUSED;
+        }
+    }
+
+// TODO: seek and resume???
+    private final void handleResume()
+    {
+        if (isLogging) Log.wtf(TAG, "======= handleResume:");
+        synchronized (mSync)
+        {
+            if (mState != STATE_PAUSED) throw new RuntimeException("invalid state to resume: " + mState);
+            mState = STATE_PLAYING;
+        }
+    }
+
+    /**
+     * search first track index matched specific MIME
+     *
+     * @param extractor
+     * @param mimeType  "video/" or "audio/"
+     * @return track index, -1 if not found
+     */
+    protected static final int selectTrack(final MediaExtractor extractor, final String mimeType)
+    {
+if (isLogging) Log.wtf(TAG_STATIC, "======= selectTrack:");
+        final int numTracks = extractor.getTrackCount();
+        MediaFormat format;
+        String mime;
+        for (int i = 0; i < numTracks; i++)
+        {
+            format = extractor.getTrackFormat(i);
+            mime = format.getString(MediaFormat.KEY_MIME);
+            if (mime.startsWith(mimeType))
+            {
+                if (isLogging)
+                {
+                    Log.wtf(TAG_STATIC, "Extractor selected track " + i + " (" + mime + "): " + format);
                 }
                 return i;
             }
         }
-
         return -1;
     }
 
-    /**
-     * Work loop.  We execute here until we run out of video or are told to stop.
+
+
+    /*
+    11-08 03:22:31.499 2902-2902/? E/Initialise --------: on creation
+11-08 03:22:31.650 2902-2902/? E/Main --: surfaceCreated
+11-08 03:22:31.662 2902-2902/? E/TTCMoviePlayer:TTCMoviePlayer: ======= Constructor:
+11-08 03:22:31.664 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= mMoviePlayerTask:run
+11-08 03:22:31.665 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ~~~~ synchronized -- 0
+11-08 03:22:31.669 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= processStop with req ==> 0
+11-08 03:22:31.692 2902-2902/? E/Main --: surfaceChanged
+11-08 03:22:31.693 2902-2902/? E/TTCMoviePlayer:TTCMoviePlayer: ======= prepare:
+11-08 03:22:31.694 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= processStop with req ==> 1
+11-08 03:22:31.695 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= handlePrepare:/storage/emulated/0/ttcVideo/big_buck_bunny.mp4
+11-08 03:22:31.704 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= updateMovieInfo
+11-08 03:22:31.719 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_prepare_video
+11-08 03:22:31.735 2902-2975/? E/WVMExtractor: Failed to open libwvm.so: dlopen failed: library "libwvm.so" not found
+11-08 03:22:31.767 2902-2975/? E/TTCMoviePlayer:: ======= selectTrack:
+11-08 03:22:31.770 2902-2975/? E/TTCMoviePlayer:: Extractor selected track 1 (video/avc): {csd-1=java.nio.HeapByteBuffer[pos=0 lim=8 cap=8], mime=video/avc, frame-rate=24, track-id=2, profile=1, width=640, height=360, max-input-size=1572864, isDMCMMExtractor=1, durationUs=60095000, csd-0=java.nio.HeapByteBuffer[pos=0 lim=25 cap=25], level=256}
+11-08 03:22:31.777 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: format:size(640,360),duration=60095000,bps=733076,framerate=0.000000,rotation=0
+11-08 03:22:31.778 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_prepare_audio
+11-08 03:22:31.792 2902-2975/? E/TTCMoviePlayer:: ======= selectTrack:
+11-08 03:22:31.793 2902-2975/? E/TTCMoviePlayer:: Extractor selected track 0 (audio/mp4a-latm): {aac-profile=2, mime=audio/mp4a-latm, channel-count=2, track-id=1, profile=2, bitrate=64000, max-input-size=1572864, isDMCMMExtractor=1, durationUs=60139682, csd-0=java.nio.HeapByteBuffer[pos=0 lim=2 cap=2], sample-rate=22050}
+11-08 03:22:31.796 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: getMinBufferSize=7120,max_input_size=1572864,mAudioInputBufSize=28480
+11-08 03:22:31.805 2902-2975/? E/prepared...: &&&&&&& onPrepared()
+11-08 03:22:31.814 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= start:
+11-08 03:22:31.816 2902-2975/? E/setMediaPlayer: @@@@@@@@@@@
+11-08 03:22:31.838 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= processPrepared
+11-08 03:22:31.838 2902-2902/? E/MediaPlayer: error (-38, 0)
+11-08 03:22:31.839 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= handleStart
+11-08 03:22:31.839 2902-2902/? E/======> Controller:: mWindowManager = android.view.WindowManagerImpl@f32457c
+11-08 03:22:31.840 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_start_video for track - 1
+11-08 03:22:31.840 2902-2902/? E/======> Controller:: mDecor = cs5248.team10.dashplayer.Player.TTCMediaController{e22588b VFE...... .F....I. 0,0-0,0}
+11-08 03:22:31.841 2902-2902/? E/======> Controller:: mDecorLayoutParams = WM.LayoutParams{(0,1080)(1920xwrap) gr=#30 ty=1000 fl=#820020 fmt=-3 naviIconColor=0}
+11-08 03:22:31.857 2902-2902/? E/MediaPlayer: Error (-38,0)
+11-08 03:22:31.898 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_start_video:codec started
+11-08 03:22:31.906 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_start_audio for track - 0
+11-08 03:22:31.962 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_start_audio:codec started
+11-08 03:22:31.966 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= AudioOutputBufSize:32768
+11-08 03:22:31.967 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= processPlaying
+11-08 03:22:31.968 2902-3060/? E/TTCMoviePlayer:TTCMoviePlayer: ======= mVideoTask:run
+11-08 03:22:31.968 2902-3061/? E/TTCMoviePlayer:TTCMoviePlayer: ======= mAudioTask:run
+11-08 03:22:31.972 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= handleLoop
+11-08 03:22:31.975 2902-3060/? E/TTCMoviePlayer:TTCMoviePlayer: ======= INFO_OUTPUT_BUFFERS_CHANGED:
+11-08 03:22:31.986 2902-3061/? E/TTCMoviePlayer:TTCMoviePlayer: ======= INFO_OUTPUT_BUFFERS_CHANGED:
+11-08 03:22:32.002 2902-3061/? E/TTCMoviePlayer:TTCMoviePlayer: ======= audio decoder output format changed: {pcm-encoding=2, mime=audio/raw, channel-count=2, sample-rate=22050}
+11-08 03:22:32.076 2902-3060/? E/TTCMoviePlayer:TTCMoviePlayer: ======= video decoder output format changed: {crop-top=0, crop-right=639, color-format=261, height=368, max_capacity=17694720, color-standard=4, crop-left=0, color-transfer=3, stride=640, mime=video/raw, slice-height=368, remained_resource=17464320, width=640, color-range=2, crop-bottom=359}
+11-08 03:22:34.873 2902-2902/cs5248.team10.dashplayer E/ViewRootImpl: sendUserActionEvent() mView == null
      */
-    private void doExtract(MediaExtractor extractor, int trackIndex, MediaCodec decoder,
-                           FrameCallback frameCallback) {
-        // We need to strike a balance between providing input and reading output that
-        // operates efficiently without delays on the output side.
-        //
-        // To avoid delays on the output side, we need to keep the codec's input buffers
-        // fed.  There can be significant latency between submitting frame N to the decoder
-        // and receiving frame N on the output, so we need to stay ahead of the game.
-        //
-        // Many video decoders seem to want several frames of video before they start
-        // producing output -- one implementation wanted four before it appeared to
-        // configure itself.  We need to provide a bunch of input frames up front, and try
-        // to keep the queue full as we go.
-        //
-        // (Note it's possible for the encoded data to be written to the stream out of order,
-        // so we can't generally submit a single frame and wait for it to appear.)
-        //
-        // We can't just fixate on the input side though.  If we spend too much time trying
-        // to stuff the input, we might miss a presentation deadline.  At 60Hz we have 16.7ms
-        // between frames, so sleeping for 10ms would eat up a significant fraction of the
-        // time allowed.  (Most video is at 30Hz or less, so for most content we'll have
-        // significantly longer.)  Waiting for output is okay, but sleeping on availability
-        // of input buffers is unwise if we need to be providing output on a regular schedule.
-        //
-        //
-        // In some situations, startup latency may be a concern.  To minimize startup time,
-        // we'd want to stuff the input full as quickly as possible.  This turns out to be
-        // somewhat complicated, as the codec may still be starting up and will refuse to
-        // accept input.  Removing the timeout from dequeueInputBuffer() results in spinning
-        // on the CPU.
-        //
-        // If you have tight startup latency requirements, it would probably be best to
-        // "prime the pump" with a sequence of frames that aren't actually shown (e.g.
-        // grab the first 10 NAL units and shove them through, then rewind to the start of
-        // the first key frame).
-        //
-        // The actual latency seems to depend on strongly on the nature of the video (e.g.
-        // resolution).
-        //
-        //
-        // One conceptually nice approach is to loop on the input side to ensure that the codec
-        // always has all the input it can handle.  After submitting a buffer, we immediately
-        // check to see if it will accept another.  We can use a short timeout so we don't
-        // miss a presentation deadline.  On the output side we only check once, with a longer
-        // timeout, then return to the outer loop to see if the codec is hungry for more input.
-        //
-        // In practice, every call to check for available buffers involves a lot of message-
-        // passing between threads and processes.  Setting a very brief timeout doesn't
-        // exactly work because the overhead required to determine that no buffer is available
-        // is substantial.  On one device, the "clever" approach caused significantly greater
-        // and more highly variable startup latency.
-        //
-        // The code below takes a very simple-minded approach that works, but carries a risk
-        // of occasionally running out of output.  A more sophisticated approach might
-        // detect an output timeout and use that as a signal to try to enqueue several input
-        // buffers on the next iteration.
-        //
-        // If you want to experiment, set the VERBOSE flag to true and watch the behavior
-        // in logcat.  Use "logcat -v threadtime" to see sub-second timing.
 
-        final int TIMEOUT_USEC = 10000;
-        ByteBuffer[] decoderInputBuffers = decoder.getInputBuffers();
-        int inputChunk = 0;
-        long firstInputTimeNsec = -1;
 
-        boolean outputDone = false;
-        boolean inputDone = false;
-        while (!outputDone) {
-            if (VERBOSE) Log.d(TAG, "loop");
-            if (mIsStopRequested) {
-                Log.d(TAG, "Stop requested");
-                return;
-            }
 
-            // Feed more data to the decoder.
-            if (!inputDone) {
-                int inputBufIndex = decoder.dequeueInputBuffer(TIMEOUT_USEC);
-                if (inputBufIndex >= 0) {
-                    if (firstInputTimeNsec == -1) {
-                        firstInputTimeNsec = System.nanoTime();
-                    }
-                    ByteBuffer inputBuf = decoderInputBuffers[inputBufIndex];
-                    // Read the sample data into the ByteBuffer.  This neither respects nor
-                    // updates inputBuf's position, limit, etc.
-                    int chunkSize = extractor.readSampleData(inputBuf, 0);
-                    if (chunkSize < 0) {
-                        // End of stream -- send empty frame with EOS flag set.
-                        decoder.queueInputBuffer(inputBufIndex, 0, 0, 0L,
-                                MediaCodec.BUFFER_FLAG_END_OF_STREAM);
-                        inputDone = true;
-                        if (VERBOSE) Log.d(TAG, "sent input EOS");
-                    } else {
-                        if (extractor.getSampleTrackIndex() != trackIndex) {
-                            Log.w(TAG, "WEIRD: got sample from track " +
-                                    extractor.getSampleTrackIndex() + ", expected " + trackIndex);
-                        }
-                        long presentationTimeUs = extractor.getSampleTime();
-                        decoder.queueInputBuffer(inputBufIndex, 0, chunkSize,
-                                presentationTimeUs, 0 /*flags*/);
-                        if (VERBOSE) {
-                            Log.d(TAG, "submitted frame " + inputChunk + " to dec, size=" +
-                                    chunkSize);
-                        }
-                        inputChunk++;
-                        extractor.advance();
-                    }
-                } else {
-                    if (VERBOSE) Log.d(TAG, "input buffer not available");
-                }
-            }
 
-            if (!outputDone) {
-                int decoderStatus = decoder.dequeueOutputBuffer(mBufferInfo, TIMEOUT_USEC);
-                if (decoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                    // no output available yet
-                    if (VERBOSE) Log.d(TAG, "no output from decoder available");
-                } else if (decoderStatus == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
-                    // not important for us, since we're using Surface
-                    if (VERBOSE) Log.d(TAG, "decoder output buffers changed");
-                } else if (decoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    MediaFormat newFormat = decoder.getOutputFormat();
-                    if (VERBOSE) Log.d(TAG, "decoder output format changed: " + newFormat);
-                } else if (decoderStatus < 0) {
-                    throw new RuntimeException(
-                            "unexpected result from decoder.dequeueOutputBuffer: " +
-                                    decoderStatus);
-                } else { // decoderStatus >= 0
-                    if (firstInputTimeNsec != 0) {
-                        // Log the delay from the first buffer of input to the first buffer
-                        // of output.
-                        long nowNsec = System.nanoTime();
-                        Log.d(TAG, "startup lag " + ((nowNsec-firstInputTimeNsec) / 1000000.0) + " ms");
-                        firstInputTimeNsec = 0;
-                    }
-                    boolean doLoop = false;
-                    if (VERBOSE) Log.d(TAG, "surface decoder given buffer " + decoderStatus +
-                            " (size=" + mBufferInfo.size + ")");
-                    if ((mBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        if (VERBOSE) Log.d(TAG, "output EOS");
-                        if (mLoop) {
-                            doLoop = true;
-                        } else {
-                            outputDone = true;
-                        }
-                    }
-
-                    boolean doRender = (mBufferInfo.size != 0);
-
-                    // As soon as we call releaseOutputBuffer, the buffer will be forwarded
-                    // to SurfaceTexture to convert to a texture.  We can't control when it
-                    // appears on-screen, but we can manage the pace at which we release
-                    // the buffers.
-                    if (doRender && frameCallback != null) {
-                        frameCallback.preRender(mBufferInfo.presentationTimeUs);
-                    }
-                    decoder.releaseOutputBuffer(decoderStatus, doRender);
-                    if (doRender && frameCallback != null) {
-                        frameCallback.postRender();
-                    }
-
-                    if (doLoop) {
-                        Log.d(TAG, "Reached EOS, looping");
-                        extractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC);
-                        inputDone = false;
-                        decoder.flush();    // reset decoder state
-                        frameCallback.loopReset();
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Thread helper for video playback.
-     * <p>
-     * The PlayerFeedback callbacks will execute on the thread that creates the object,
-     * assuming that thread has a looper.  Otherwise, they will execute on the main looper.
+    /*
+    11-08 03:23:31.727 2902-3060/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= sent input EOS:android.media.MediaCodec@ab04357
+11-08 03:23:31.749 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= processPlaying
+11-08 03:23:31.754 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= handleLoop
+11-08 03:23:32.033 2902-3061/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= sent input EOS:android.media.MediaCodec@38bbdf3
+11-08 03:23:32.038 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= processPlaying
+11-08 03:23:32.044 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= handleLoop
+11-08 03:23:32.046 2902-3060/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= video:output EOS
+11-08 03:23:32.049 2902-3060/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= VideoTask:finished
+11-08 03:23:32.053 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= processPlaying
+11-08 03:23:32.068 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= handleLoop
+11-08 03:23:32.143 2902-3061/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= audio:output EOS
+11-08 03:23:32.147 2902-3061/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= AudioTask:finished
+11-08 03:23:32.148 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= Reached EOS, looping check
+11-08 03:23:32.152 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= handleStop:
+11-08 03:23:32.162 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_stop_video:
+11-08 03:23:32.164 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_stop_audio:
+11-08 03:23:32.213 2902-2975/cs5248.team10.dashplayer E/done..: &&&&&&& onFinished() with counter == 0
+11-08 03:23:32.215 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= prepare:
+11-08 03:23:32.217 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= processStop with req ==> 1
+11-08 03:23:32.218 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= handlePrepare:/storage/emulated/0/ttcVideo/big_buck_bunny.mp4
+11-08 03:23:32.225 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= updateMovieInfo
+11-08 03:23:32.232 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_prepare_video
+11-08 03:23:32.269 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:: ======= selectTrack:
+11-08 03:23:32.274 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:: Extractor selected track 1 (video/avc): {csd-1=java.nio.HeapByteBuffer[pos=0 lim=8 cap=8], mime=video/avc, frame-rate=24, track-id=2, profile=1, width=640, height=360, max-input-size=1572864, isDMCMMExtractor=1, durationUs=60095000, csd-0=java.nio.HeapByteBuffer[pos=0 lim=25 cap=25], level=256}
+11-08 03:23:32.279 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: format:size(640,360),duration=60095000,bps=733076,framerate=0.000000,rotation=0
+11-08 03:23:32.281 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_prepare_audio
+11-08 03:23:32.330 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:: ======= selectTrack:
+11-08 03:23:32.333 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:: Extractor selected track 0 (audio/mp4a-latm): {aac-profile=2, mime=audio/mp4a-latm, channel-count=2, track-id=1, profile=2, bitrate=64000, max-input-size=1572864, isDMCMMExtractor=1, durationUs=60139682, csd-0=java.nio.HeapByteBuffer[pos=0 lim=2 cap=2], sample-rate=22050}
+11-08 03:23:32.340 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: getMinBufferSize=7120,max_input_size=1572864,mAudioInputBufSize=28480
+11-08 03:23:32.365 2902-2975/cs5248.team10.dashplayer E/prepared...: &&&&&&& onPrepared()
+11-08 03:23:32.369 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= start:
+11-08 03:23:32.372 2902-2975/cs5248.team10.dashplayer E/setMediaPlayer: @@@@@@@@@@@
+11-08 03:23:32.407 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= processPrepared
+11-08 03:23:32.409 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= handleStart
+11-08 03:23:32.410 2902-2902/cs5248.team10.dashplayer E/======> Controller:: mWindowManager = android.view.WindowManagerImpl@f32457c
+11-08 03:23:32.413 2902-2902/cs5248.team10.dashplayer E/======> Controller:: mDecor = cs5248.team10.dashplayer.Player.TTCMediaController{e22588b VFE...... .F....ID 0,0-1920,264}
+11-08 03:23:32.412 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_start_video for track - 1
+11-08 03:23:32.415 2902-2902/cs5248.team10.dashplayer E/======> Controller:: mDecorLayoutParams = WM.LayoutParams{(0,1080)(1920xwrap) gr=#30 ty=1000 fl=#1820020 fmt=-3 naviIconColor=0}
+11-08 03:23:32.485 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_start_video:codec started
+11-08 03:23:32.488 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_start_audio for track - 0
+11-08 03:23:32.526 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_start_audio:codec started
+11-08 03:23:32.528 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= AudioOutputBufSize:32768
+11-08 03:23:32.530 2902-5652/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= mVideoTask:run
+11-08 03:23:32.530 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= processPlaying
+11-08 03:23:32.531 2902-5653/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= mAudioTask:run
+11-08 03:23:32.534 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= handleLoop
+11-08 03:23:32.536 2902-5652/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= INFO_OUTPUT_BUFFERS_CHANGED:
+11-08 03:23:32.546 2902-5653/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= INFO_OUTPUT_BUFFERS_CHANGED:
+11-08 03:23:32.560 2902-5653/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= audio decoder output format changed: {pcm-encoding=2, mime=audio/raw, channel-count=2, sample-rate=22050}
+11-08 03:23:32.640 2902-5652/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= video decoder output format changed: {crop-top=0, crop-right=639, color-format=261, height=368, max_capacity=17694720, color-standard=4, crop-left=0, color-transfer=3, stride=640, mime=video/raw, slice-height=368, remained_resource=17464320, width=640, color-range=2, crop-bottom=359}
+11-08 03:23:35.470 2902-2902/cs5248.team10.dashplayer E/ViewRootImpl: sendUserActionEvent() mView == null
      */
-    public static class PlayTask implements Runnable {
-        private static final int MSG_PLAY_STOPPED = 0;
-
-        private TTCMoviePlayer mPlayer;
-        private PlayerFeedback mFeedback;
-        private boolean mDoLoop;
-        private Thread mThread;
-        private LocalHandler mLocalHandler;
-
-        private final Object mStopLock = new Object();
-        private boolean mStopped = false;
-
-        /**
-         * Prepares new PlayTask.
-         *
-         * @param player The player object, configured with control and output.
-         * @param feedback UI feedback object.
-         */
-        public PlayTask(TTCMoviePlayer player, PlayerFeedback feedback) {
-            mPlayer = player;
-            mFeedback = feedback;
-
-            mLocalHandler = new LocalHandler();
-        }
-
-        /**
-         * Sets the loop mode.  If true, playback will loop forever.
-         */
-        public void setLoopMode(boolean loopMode) {
-            mDoLoop = loopMode;
-        }
-
-        /**
-         * Creates a new thread, and starts execution of the player.
-         */
-        public void execute() {
-            mPlayer.setLoopMode(mDoLoop);
-            mThread = new Thread(this, "Movie Player");
-            mThread.start();
-        }
-
-        /**
-         * Requests that the player stop.
-         * <p>
-         * Called from arbitrary thread.
-         */
-        public void requestStop() {
-            mPlayer.requestStop();
-        }
-
-        /**
-         * Wait for the player to stop.
-         * <p>
-         * Called from any thread other than the PlayTask thread.
-         */
-        public void waitForStop() {
-            synchronized (mStopLock) {
-                while (!mStopped) {
-                    try {
-                        mStopLock.wait();
-                    } catch (InterruptedException ie) {
-                        // discard
-                    }
-                }
-            }
-        }
-
-        @Override
-        public void run() {
-            try {
-                mPlayer.play();
-            } catch (IOException ioe) {
-                throw new RuntimeException(ioe);
-            } finally {
-                // tell anybody waiting on us that we're done
-                synchronized (mStopLock) {
-                    mStopped = true;
-                    mStopLock.notifyAll();
-                }
-
-                // Send message through Handler so it runs on the right thread.
-                mLocalHandler.sendMessage(
-                        mLocalHandler.obtainMessage(MSG_PLAY_STOPPED, mFeedback));
-            }
-        }
-
-        private static class LocalHandler extends Handler {
-            @Override
-            public void handleMessage(Message msg) {
-                int what = msg.what;
-
-                switch (what) {
-                    case MSG_PLAY_STOPPED:
-                        PlayerFeedback fb = (PlayerFeedback) msg.obj;
-                        fb.playbackStopped();
-                        break;
-                    default:
-                        throw new RuntimeException("Unknown msg " + what);
-                }
-            }
-        }
-    }
 }
