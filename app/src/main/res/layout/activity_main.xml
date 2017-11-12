@@ -1,23 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              xmlns:tools="http://schemas.android.com/tools"
-              android:id="@+id/video_container"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent"
-              android:background="@android:color/black"
-              android:gravity="center_horizontal|center_vertical"
-              android:orientation="horizontal"
-              tools:context="cs5248.team10.dashplayer.MainActivity">
+<!--<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"-->
+<!--xmlns:tools="http://schemas.android.com/tools"-->
+<!--android:id="@+id/video_container"-->
+<!--android:layout_width="match_parent"-->
+<!--android:layout_height="match_parent"-->
+<!--android:background="@android:color/white"-->
+<!--android:gravity="center_horizontal|center_vertical"-->
+<!--android:orientation="horizontal"-->
+<!--tools:context="cs5248.team10.dashplayer.MainActivity">-->
 
-    <FrameLayout
-        android:id="@+id/videoSurfaceContainer"
+<android.support.v4.widget.SwipeRefreshLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/swipeContainer"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+
+    <ListView
+        android:id="@+id/vidList"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" >
+        android:layout_height="match_parent"/>
+</android.support.v4.widget.SwipeRefreshLayout>
 
-        <SurfaceView
-            android:id="@+id/surfaceView"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
-    </FrameLayout>
-
-</LinearLayout>
+    <!--</LinearLayout>-->

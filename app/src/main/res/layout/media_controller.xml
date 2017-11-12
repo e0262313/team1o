@@ -28,20 +28,9 @@
         android:paddingTop="4dip">
 
         <ImageButton
-            android:id="@+id/prev"
-            style="@android:style/MediaButton.Previous"
-            android:contentDescription="Previous"/>
-
-        <ImageButton
             android:id="@+id/pause"
             style="@android:style/MediaButton.Play"
             android:contentDescription="Play"/>
-
-
-        <ImageButton
-            android:id="@+id/next"
-            style="@android:style/MediaButton.Next"
-            android:contentDescription="Next"/>
 
     </LinearLayout>
 

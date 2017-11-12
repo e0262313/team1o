@@ -15,52 +15,57 @@ package cs5248.team10.dashplayer;
  * 1) Implement video switching and rendering seamlessly.
  * 2) Display the current network bandwidth estimation results visually.
  *
- *
- * References:
- * - https://github.com/vecio/MediaCodecDemo/blob/master/src/io/vec/demo/mediacodec/DecodeActivity.java
- * - https://examples.javacodegeeks.com/android/core/ui/surfaceview/android-surfaceview-example/
- * - http://sohailaziz05.blogspot.sg/2014/06/mediacodec-decoding-aac-android.html
- * - https://github.com/saki4510t/AudioVideoPlayerSample
- * - https://stackoverflow.com/questions/999771/get-filenotfoundexception-when-initialising-fileinputstream-with-file-object
- * - https://stackoverflow.com/questions/8854359/exception-open-failed-eacces-permission-denied-on-android
+ * Reference:
+ * - https://stackoverflow.com/questions/21369037/android-list-view-with-additional-extra-hidden-fields
+ * - https://guides.codepath.com/android/implementing-pull-to-refresh-guide
  */
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
 import android.content.pm.ActivityInfo;
-import android.content.pm.PackageManager;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
-import android.support.v4.app.ActivityCompat;
+import android.support.v4.widget.SwipeRefreshLayout;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.MotionEvent;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
+import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
-import android.widget.FrameLayout;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
+import android.widget.ListView;
 
-import cs5248.team10.dashplayer.Player.FrameCallback;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+
+import cs5248.team10.dashplayer.AsyncTask.MP4DownloaderTask;
+import cs5248.team10.dashplayer.AsyncTask.PlaylistReader;
 import cs5248.team10.dashplayer.Player.TTCMediaController;
 import cs5248.team10.dashplayer.Player.TTCMoviePlayer;
 
-public class MainActivity extends AppCompatActivity implements SurfaceHolder.Callback, TTCMediaController.MediaPlayerControl
+public class MainActivity extends AppCompatActivity
 {
 
     // DONE: to start a single video from url with media codec + extractor
     // HALF: start video + audio together (refactor code)
     // DONE: play video from phone itself - assume that will dwl video from server (do later)
-    // TODO: Media player pause, seekTo, resume, time passed + progress
+    // TODO: Media player pause, seekTo, resume, time passed + progress (totally unusable now)
     // TODO: to start multiple videos (back to back) === BUG: why is video playback faster
 
-    // TODO: to retrieve list of videos from server (playlist)
-    // TODO: to display the playlist to user (need to update or auto refresh?)
-    // TODO: to dwl video when selected (MPEG-DASH XML-formatted??) (async?)
-    // TODO: to use asynctask to retrieve the 3 sec streamlets on the fly
+    // TODO: to retrieve list of videos from server (playlist) -- waiting for file
+    // DONE: to display the playlist to user (need to update or auto refresh?) -- used fake data
+    // TODO: to dwl video when selected (MPEG-DASH XML-formatted??) (async?) -- waiting for file
+    // DONE: to use asynctask to retrieve the 3 sec streamlets on the fly -- MP4DownloaderTask
     // TODO: **** bandwidth estimation algorithm???
     // TODO: **** adaptively switch between streamlet
+
+    private SwipeRefreshLayout swipeContainer;
 
     private TTCMoviePlayer mPlayer = null;
     private TTCMediaController mController;
@@ -74,6 +79,13 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     private int playToPosition = 0;
 
     private int BUFFER_SIZE = 10000;
+
+    private String dwlPath = "http://monterosa.d2.comp.nus.edu.sg/~team10/server/upload/";
+    private String livePath = "http://monterosa.d2.comp.nus.edu.sg/~team10/server/upload_live/";
+
+    private String savePath = Environment.getExternalStorageDirectory() + "/ttcVideo/";
+
+    private String TEST = "http://monterosa.d2.comp.nus.edu.sg/~team10/server/upload/test1/high/output003.mp4";
 
     private String SAMPLE = Environment.getExternalStorageDirectory() + "/ttcVideo/MVCAU_20171015_165316/VIDEO_20171015_165329.mp4";
 //    private String SAMPLE = Environment.getExternalStorageDirectory() + "/ttcVideo/big_buck_bunny.mp4";
@@ -95,19 +107,29 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
         // remove title
         requestWindowFeature(Window.FEATURE_NO_TITLE);
 //        Remove notification bar
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
-                WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LOCKED);
 
         setContentView(R.layout.activity_main);
 
-        verifyStoragePermissions(MainActivity.this);
+        // check savePath exist
+        checkAndCreateDir(savePath);
 
-        SurfaceView surfaceView = (SurfaceView) findViewById(R.id.surfaceView);
-        surfaceView.getHolder().addCallback(MainActivity.this);
+        // populate into the list view
+        new PlaylistReader(MainActivity.this, null).execute();
 
+        swipeContainer = (SwipeRefreshLayout) findViewById(R.id.swipeContainer);
+        // Setup refresh listener which triggers new data loading
+        swipeContainer.setOnRefreshListener(new SwipeRefreshLayout.OnRefreshListener()
+        {
+            @Override
+            public void onRefresh()
+            {
+                new PlaylistReader(MainActivity.this, swipeContainer).execute();
+            }
+        });
     }
 
     protected void onDestroy()
@@ -124,7 +146,6 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
 
     }
 
-
     // After rotating the phone. This method is called.
     @Override
     public void onRestoreInstanceState(Bundle savedInstanceState)
@@ -135,189 +156,27 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
         playToPosition = savedInstanceState.getInt(CURR_POSITION);
     }
 
-    @Override
-    public void surfaceCreated(SurfaceHolder surfaceHolder)
-    {
-        Log.wtf("Main --", "surfaceCreated");
-        if (mPlayer == null)
-        {
-            mPlayer = new TTCMoviePlayer(surfaceHolder.getSurface(), mFrameCallback);
-            mController = new TTCMediaController(this);
-            mController.setMediaPlayer(mPlayer);
-//            mController.setAnchorView(findViewById(R.id.surfaceView));
-            mController.setAnchorView((FrameLayout) findViewById(R.id.videoSurfaceContainer));
-            Log.wtf("surfaceCreated", "<<<<<<<< setup mplayer and mController");
-        }
-    }
-
-    @Override
-    public void surfaceChanged(SurfaceHolder surfaceHolder, int i, int i1, int i2)
-    {
-        Log.wtf("Main --", "surfaceChanged");
-        if (mPlayer != null)
-        {
-            mPlayer.prepare(SAMPLE);
-        }
-    }
-
-    @Override
-    public void surfaceDestroyed(SurfaceHolder surfaceHolder)
-    {
-        if (mPlayer != null)
-        {
-            mPlayer.end();
-            mPlayer = null;
-        }
-    }
-
     /**
      * When user touches the screen
+     *
      * @param event
      * @return
      */
     @Override
     public boolean onTouchEvent(MotionEvent event)
     {
-Log.d("@@ onTouchEvent", "to show MC");
-        mController.show();
+        Log.d("@@ onTouchEvent", "click list?");
+//        mController.show();
         return false;
     }
 
-    /**
-     * callback methods from decoder
-     */
-    private final FrameCallback mFrameCallback = new FrameCallback()
+    private File checkAndCreateDir(String targetPath)
     {
-        @Override
-        public void onPrepared()
+        File target = new File(targetPath);
+        if (!target.exists() || !target.isDirectory())
         {
-            Log.wtf("prepared... ", "&&&&&&& onPrepared()");
-            if (mPlayer == null)
-            {
-                Log.wtf("callback... ", "Why is mPlayer null???");
-                return;
-            }
-
-            mPlayer.start();
-
-            handler.post(new Runnable()
-            {
-                public void run()
-                {
-                    // TODO: check if looping before setting this
-                    if (counter == 0)
-                    {
-                        mController.setEnabled(true);
-                        mController.show();
-                    }
-                }
-            });
-
+            target.mkdir();
         }
-
-        @Override
-        public void onFinished()
-        {
-            Log.wtf("done.. ", "&&&&&&& onFinished() with counter == " + counter);
-
-            // try loop playing?
-            if (counter++ < 2)
-            {
-                if (mPlayer == null)
-                {
-                    Log.wtf("callback... ", "Why is mPlayer null???");
-                    return;
-                }
-                else mPlayer.prepare(SAMPLE);
-            }
-            else
-            {
-                mPlayer = null;
-                mController.hide();
-            }
-        }
-
-        @Override
-        public boolean onFrameAvailable(long presentationTimeUs)
-        {
-            return false;
-        }
-    };
-
-
-    //--MediaPlayerControl methods----------------------------------------------------
-    public void start()
-    {
-        Log.wtf("MediaCTR ==> ", " start button!!");
-        mPlayer.start();
-    }
-
-    public void pause()
-    {
-        mPlayer.pause();
-    }
-
-    public int getDuration()
-    {
-        return mPlayer.getDuration();
-    }
-
-    public int getCurrentPosition()
-    {
-        return mPlayer.getCurrentPosition();
-    }
-
-    public void seekTo(int i)
-    {
-Log.wtf("seekTo", "i = " + i);
-        mPlayer.seekTo(i);
-    }
-
-    public boolean isPlaying()
-    {
-        return mPlayer.isPlaying();
-    }
-
-    public int getBufferPercentage()
-    {
-        return 0;
-    }
-
-    public boolean canPause()
-    {
-        return true;
-    }
-
-    public boolean canSeekBackward()
-    {
-        return true;
-    }
-
-    public boolean canSeekForward()
-    {
-        return true;
-    }
-    //--------------------------------------------------------------------------------
-
-    /**
-     * For API 23+
-     *
-     * Checks if the app has permission to read the device storage
-     *
-     * If the app does not has permission then the user will be prompted to grant permissions
-     *
-     * @param activity
-     */
-    public static void verifyStoragePermissions(Activity activity)
-    {
-        // Check if we have write permission
-        int permission = ActivityCompat.checkSelfPermission(activity, Manifest.permission.WRITE_EXTERNAL_STORAGE);
-
-        if (permission != PackageManager.PERMISSION_GRANTED)
-        {
-            // We don't have permission so prompt the user
-            // Will display popup to ask user for permission
-            ActivityCompat.requestPermissions(activity, PERMISSIONS_STORAGE, REQUEST_EXTERNAL_STORAGE);
-        }
+        return target;
     }
 }

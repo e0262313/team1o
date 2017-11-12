@@ -226,7 +226,7 @@ public class TTCMoviePlayer extends MediaPlayer
      */
     public final void start()
     {
-if (isLogging) Log.wtf(TAG, "======= start with state: " + mState);
+        if (isLogging) Log.wtf(TAG, "======= start with state: " + mState);
         synchronized (mSync)
         {
             if (mState == STATE_PLAYING) return;
@@ -281,7 +281,7 @@ if (isLogging) Log.wtf(TAG, "======= start with state: " + mState);
      */
     public final void pause()
     {
-if (isLogging) Log.wtf(TAG, "======= pause:");
+        if (isLogging) Log.wtf(TAG, "======= pause:");
         synchronized (mSync)
         {
             if (mState == STATE_PAUSED) return;
@@ -327,14 +327,14 @@ if (isLogging) Log.wtf(TAG, "======= pause:");
         @Override
         public final void run()
         {
-if (isLogging) Log.wtf(TAG, "======= mMoviePlayerTask:run");
+            if (isLogging) Log.wtf(TAG, "======= mMoviePlayerTask:run");
             boolean local_isRunning = false;
             int local_req;
             try
             {
                 synchronized (mSync)
                 {
-Log.wtf(TAG, "~~~~ synchronized -- " + mRequest);
+                    Log.wtf(TAG, "~~~~ synchronized -- " + mRequest);
                     local_isRunning = mIsRunning = true;
                     mState = STATE_STOP;
                     mRequest = REQ_NON;
@@ -408,7 +408,7 @@ Log.wtf(TAG, "~~~~ synchronized -- " + mRequest);
         @Override
         public void run()
         {
-if (isLogging) Log.wtf(TAG, "======= mVideoTask:run");
+            if (isLogging) Log.wtf(TAG, "======= mVideoTask:run");
             for (; mIsRunning && !mVideoInputDone && !mVideoOutputDone; )
             {
                 try
@@ -450,7 +450,7 @@ if (isLogging) Log.wtf(TAG, "======= mVideoTask:run");
         @Override
         public void run()
         {
-if (isLogging) Log.wtf(TAG, "======= mAudioTask:run");
+            if (isLogging) Log.wtf(TAG, "======= mAudioTask:run");
             for (; mIsRunning && !mAudioInputDone && !mAudioOutputDone; )
             {
                 try
@@ -489,7 +489,7 @@ if (isLogging) Log.wtf(TAG, "======= mAudioTask:run");
      */
     private final boolean processStop(final int req) throws InterruptedException, IOException
     {
-if (isLogging) Log.wtf(TAG, "======= processStop with req ==> " + req);
+        if (isLogging) Log.wtf(TAG, "======= processStop with req ==> " + req);
         boolean local_isRunning = true;
         switch (req)
         {
@@ -525,7 +525,7 @@ if (isLogging) Log.wtf(TAG, "======= processStop with req ==> " + req);
      */
     private final boolean processPrepared(final int req) throws InterruptedException
     {
-if (isLogging) Log.wtf(TAG, "======= processPrepared");
+        if (isLogging) Log.wtf(TAG, "======= processPrepared");
         boolean local_isRunning = true;
         mCanPause = true;
         switch (req)
@@ -564,7 +564,7 @@ if (isLogging) Log.wtf(TAG, "======= processPrepared");
      */
     private final boolean processPlaying(final int req)
     {
-if (isLogging) Log.wtf(TAG, "======= processPlaying");
+        if (isLogging) Log.wtf(TAG, "======= processPlaying");
         boolean local_isRunning = true;
         switch (req)
         {
@@ -602,7 +602,7 @@ if (isLogging) Log.wtf(TAG, "======= processPlaying");
      */
     private final boolean processPaused(final int req) throws InterruptedException
     {
-if (isLogging) Log.wtf(TAG, "======= processPaused");
+        if (isLogging) Log.wtf(TAG, "======= processPaused");
         boolean local_isRunning = true;
         switch (req)
         {
@@ -640,9 +640,22 @@ if (isLogging) Log.wtf(TAG, "======= processPaused");
      * @param source_file
      * @throws IOException
      */
+    private boolean isInternalFile(final String source_file){
+        File file = new File(source_file);
+
+        try
+        {
+            new FileInputStream(file);
+        }
+        catch (FileNotFoundException e) {
+            return false;
+        }
+        return true;
+    }
+
     private final void handlePrepare(final String source_file) throws IOException
     {
-if (isLogging) Log.wtf(TAG, "======= handlePrepare:" + source_file);
+        if (isLogging) Log.wtf(TAG, "======= handlePrepare:" + source_file);
         synchronized (mSync)
         {
             if (mState != STATE_STOP)
@@ -651,24 +664,35 @@ if (isLogging) Log.wtf(TAG, "======= handlePrepare:" + source_file);
             }
         }
 
-        File file = new File(source_file);
-
-        FileInputStream fileInputStream;
-        try
-        {
-            fileInputStream = new FileInputStream(file);
-        }
-        catch (FileNotFoundException e) {
-            throw new FileNotFoundException("Stream: Unable to read " + file.getPath() + " | exist?: "
-                    + file.exists() + " or isFile?: " + file.isFile() + " or canRead?: " + file.canRead());
-        }
-
         mVideoTrackIndex = mAudioTrackIndex = -1;
         mMetadata = new MediaMetadataRetriever();
 
-//        mMetadata.setDataSource(source_file, new HashMap<String, String>());
-        mMetadata.setDataSource(fileInputStream.getFD());
-        fileInputStream.close();
+
+        // TODO: check if source_file exist, if not to wait and re-try
+        // if video is downloaded to phone
+        if(isInternalFile(source_file))
+        {
+            File file = new File(source_file);
+
+            FileInputStream fileInputStream;
+            try
+            {
+                fileInputStream = new FileInputStream(file);
+            }
+            catch (FileNotFoundException e) {
+                throw new FileNotFoundException("Stream: Unable to read " + file.getPath() + " | exist?: "
+                        + file.exists() + " or isFile?: " + file.isFile() + " or canRead?: " + file.canRead());
+            }
+
+            // mMetadata.setDataSource(source_file, new HashMap<String, String>());
+            mMetadata.setDataSource(fileInputStream.getFD());
+            fileInputStream.close();
+        }
+        // if video is from internet
+        else
+        {
+            mMetadata.setDataSource(source_file, new HashMap<String, String>());
+        }
 
         updateMovieInfo();
         // preparation for video playback
@@ -693,7 +717,7 @@ if (isLogging) Log.wtf(TAG, "======= handlePrepare:" + source_file);
      */
     protected int internal_prepare_video(final String source_path)
     {
-if (isLogging) Log.wtf(TAG, "======= internal_prepare_video");        
+        if (isLogging) Log.wtf(TAG, "======= internal_prepare_video");
         int trackindex = -1;
         mVideoMediaExtractor = new MediaExtractor();
         try
@@ -724,7 +748,7 @@ if (isLogging) Log.wtf(TAG, "======= internal_prepare_video");
      */
     protected int internal_prepare_audio(final String source_file)
     {
-if (isLogging) Log.wtf(TAG, "======= internal_prepare_audio");
+        if (isLogging) Log.wtf(TAG, "======= internal_prepare_audio");
         int trackindex = -1;
         mAudioMediaExtractor = new MediaExtractor();
         try
@@ -767,7 +791,7 @@ if (isLogging) Log.wtf(TAG, "======= internal_prepare_audio");
 
     protected void updateMovieInfo()
     {
-if (isLogging) Log.wtf(TAG, "======= updateMovieInfo");
+        if (isLogging) Log.wtf(TAG, "======= updateMovieInfo");
         mVideoWidth = mVideoHeight = mRotation = mBitrate = 0;
         mDuration = 0L;
         mFrameRate = 0;
@@ -800,7 +824,7 @@ if (isLogging) Log.wtf(TAG, "======= updateMovieInfo");
 
     private final void handleStart()
     {
-if (isLogging) Log.wtf(TAG, "======= handleStart");
+        if (isLogging) Log.wtf(TAG, "======= handleStart");
         synchronized (mSync)
         {
             if (mState != STATE_PREPARED) throw new RuntimeException("invalid state:" + mState);
@@ -852,7 +876,7 @@ if (isLogging) Log.wtf(TAG, "======= handleStart");
     protected MediaCodec internal_start_video(final MediaExtractor media_extractor,
                                               final int trackIndex)
     {
-if (isLogging) Log.wtf(TAG, "======= internal_start_video for track - " + trackIndex);
+        if (isLogging) Log.wtf(TAG, "======= internal_start_video for track - " + trackIndex);
         MediaCodec codec = null;
         if (trackIndex >= 0)
         {
@@ -881,7 +905,7 @@ if (isLogging) Log.wtf(TAG, "======= internal_start_video for track - " + trackI
     protected MediaCodec internal_start_audio(final MediaExtractor media_extractor,
                                               final int trackIndex)
     {
-if (isLogging) Log.wtf(TAG, "======= internal_start_audio for track - " + trackIndex);
+        if (isLogging) Log.wtf(TAG, "======= internal_start_audio for track - " + trackIndex);
         MediaCodec codec = null;
         if (trackIndex >= 0)
         {
@@ -910,7 +934,7 @@ if (isLogging) Log.wtf(TAG, "======= internal_start_audio for track - " + trackI
 
     private final void handleSeek(final int newTime)
     {
-if (isLogging) Log.wtf(TAG, "======= handleSeek from time -> " + newTime);
+        if (isLogging) Log.wtf(TAG, "======= handleSeek from time -> " + newTime);
         if (newTime < 0) return;
 
         if (mVideoTrackIndex >= 0)
@@ -928,7 +952,7 @@ if (isLogging) Log.wtf(TAG, "======= handleSeek from time -> " + newTime);
 
     private final void handleLoop()
     {
-if (isLogging) Log.wtf(TAG, "======= handleLoop");
+        if (isLogging) Log.wtf(TAG, "======= handleLoop");
         synchronized (mSync)
         {
             try
@@ -956,7 +980,7 @@ if (isLogging) Log.wtf(TAG, "======= handleLoop");
                                              final ByteBuffer[] inputBuffers,
                                              final long presentationTimeUs)
     {
-if (isLogging) Log.d(TAG, "======= internal_process_input:presentationTimeUs=" + presentationTimeUs);
+        if (isLogging) Log.d(TAG, "======= internal_process_input:presentationTimeUs=" + presentationTimeUs);
         boolean result = true;
         while (mIsRunning)
         {
@@ -978,7 +1002,7 @@ if (isLogging) Log.d(TAG, "======= internal_process_input:presentationTimeUs=" +
 
     private final void handleInputVideo()
     {
-if (isLogging) Log.d(TAG, "======= handleInputVideo");
+        if (isLogging) Log.d(TAG, "======= handleInputVideo");
         final long presentationTimeUs = mVideoMediaExtractor.getSampleTime();
 /*		if (presentationTimeUs < previousVideoPresentationTimeUs) {
             presentationTimeUs += previousVideoPresentationTimeUs - presentationTimeUs; // + EPS;
@@ -1011,7 +1035,7 @@ if (isLogging) Log.d(TAG, "======= handleInputVideo");
      */
     private final void handleOutputVideo(final FrameCallback frameCallback)
     {
-if (isLogging) Log.d(TAG, "======= handleOutputVideo:");
+        if (isLogging) Log.d(TAG, "======= handleOutputVideo:");
         while (mIsRunning && !mVideoOutputDone)
         {
             final int decoderStatus = mVideoMediaCodec.dequeueOutputBuffer(mVideoBufferInfo, TIMEOUT_USEC);
@@ -1077,7 +1101,7 @@ if (isLogging) Log.d(TAG, "======= handleOutputVideo:");
 
     private final void handleInputAudio()
     {
-if (isLogging) Log.d(TAG, "======= handleInputAudio");
+        if (isLogging) Log.d(TAG, "======= handleInputAudio");
         final long presentationTimeUs = mAudioMediaExtractor.getSampleTime();
 /*		if (presentationTimeUs < previousAudioPresentationTimeUs) {
             presentationTimeUs += previousAudioPresentationTimeUs - presentationTimeUs; //  + EPS;
@@ -1107,7 +1131,7 @@ if (isLogging) Log.d(TAG, "======= handleInputAudio");
 
     private final void handleOutputAudio(final FrameCallback frameCallback)
     {
-if (isLogging) Log.d(TAG, "======= handleOutputAudio:");
+        if (isLogging) Log.d(TAG, "======= handleOutputAudio:");
         while (mIsRunning && !mAudioOutputDone)
         {
             final int decoderStatus = mAudioMediaCodec.dequeueOutputBuffer(mAudioBufferInfo, TIMEOUT_USEC);
@@ -1158,9 +1182,9 @@ if (isLogging) Log.d(TAG, "======= handleOutputAudio:");
      * @return ignored
      */
     protected void internal_write_audio(final ByteBuffer buffer, final int offset,
-                                           final int size)
+                                        final int size)
     {
-if (isLogging) Log.d(TAG, "======= internal_write_audio");
+        if (isLogging) Log.d(TAG, "======= internal_write_audio");
         if (mAudioOutTempBuf.length < size)
         {
             mAudioOutTempBuf = new byte[size];
@@ -1182,7 +1206,7 @@ if (isLogging) Log.d(TAG, "======= internal_write_audio");
     protected long adjustPresentationTime(final Object sync, final long startTime,
                                           final long presentationTimeUs)
     {
-if (isLogging) Log.d(TAG, "======= adjustPresentationTime | start time = " + startTime + " and presentationTimeUs = " + presentationTimeUs);
+        if (isLogging) Log.d(TAG, "======= adjustPresentationTime | start time = " + startTime + " and presentationTimeUs = " + presentationTimeUs);
         if (startTime > 0)
         {
             for (long t = presentationTimeUs - (System.nanoTime() / 1000 - startTime); t > 0; t = presentationTimeUs - (System.nanoTime() / 1000 - startTime))
@@ -1209,7 +1233,7 @@ if (isLogging) Log.d(TAG, "======= adjustPresentationTime | start time = " + sta
 
     private final void handleStop()
     {
-if (isLogging) Log.wtf(TAG, "======= handleStop:");
+        if (isLogging) Log.wtf(TAG, "======= handleStop:");
         synchronized (mVideoTask)
         {
             internal_stop_video();
@@ -1277,14 +1301,14 @@ if (isLogging) Log.wtf(TAG, "======= handleStop:");
 
     private final void handlePause()
     {
-if (isLogging) Log.wtf(TAG, "======= handlePause:");
+        if (isLogging) Log.wtf(TAG, "======= handlePause:");
         synchronized (mSync)
         {
             mState = STATE_PAUSED;
         }
     }
 
-// TODO: seek and resume???
+    // TODO: seek and resume???
     private final void handleResume()
     {
         if (isLogging) Log.wtf(TAG, "======= handleResume:");
@@ -1304,7 +1328,7 @@ if (isLogging) Log.wtf(TAG, "======= handlePause:");
      */
     protected static final int selectTrack(final MediaExtractor extractor, final String mimeType)
     {
-if (isLogging) Log.wtf(TAG_STATIC, "======= selectTrack:");
+        if (isLogging) Log.wtf(TAG_STATIC, "======= selectTrack:");
         final int numTracks = extractor.getTrackCount();
         MediaFormat format;
         String mime;
@@ -1323,110 +1347,4 @@ if (isLogging) Log.wtf(TAG_STATIC, "======= selectTrack:");
         }
         return -1;
     }
-
-
-
-    /*
-    11-08 03:22:31.499 2902-2902/? E/Initialise --------: on creation
-11-08 03:22:31.650 2902-2902/? E/Main --: surfaceCreated
-11-08 03:22:31.662 2902-2902/? E/TTCMoviePlayer:TTCMoviePlayer: ======= Constructor:
-11-08 03:22:31.664 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= mMoviePlayerTask:run
-11-08 03:22:31.665 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ~~~~ synchronized -- 0
-11-08 03:22:31.669 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= processStop with req ==> 0
-11-08 03:22:31.692 2902-2902/? E/Main --: surfaceChanged
-11-08 03:22:31.693 2902-2902/? E/TTCMoviePlayer:TTCMoviePlayer: ======= prepare:
-11-08 03:22:31.694 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= processStop with req ==> 1
-11-08 03:22:31.695 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= handlePrepare:/storage/emulated/0/ttcVideo/big_buck_bunny.mp4
-11-08 03:22:31.704 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= updateMovieInfo
-11-08 03:22:31.719 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_prepare_video
-11-08 03:22:31.735 2902-2975/? E/WVMExtractor: Failed to open libwvm.so: dlopen failed: library "libwvm.so" not found
-11-08 03:22:31.767 2902-2975/? E/TTCMoviePlayer:: ======= selectTrack:
-11-08 03:22:31.770 2902-2975/? E/TTCMoviePlayer:: Extractor selected track 1 (video/avc): {csd-1=java.nio.HeapByteBuffer[pos=0 lim=8 cap=8], mime=video/avc, frame-rate=24, track-id=2, profile=1, width=640, height=360, max-input-size=1572864, isDMCMMExtractor=1, durationUs=60095000, csd-0=java.nio.HeapByteBuffer[pos=0 lim=25 cap=25], level=256}
-11-08 03:22:31.777 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: format:size(640,360),duration=60095000,bps=733076,framerate=0.000000,rotation=0
-11-08 03:22:31.778 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_prepare_audio
-11-08 03:22:31.792 2902-2975/? E/TTCMoviePlayer:: ======= selectTrack:
-11-08 03:22:31.793 2902-2975/? E/TTCMoviePlayer:: Extractor selected track 0 (audio/mp4a-latm): {aac-profile=2, mime=audio/mp4a-latm, channel-count=2, track-id=1, profile=2, bitrate=64000, max-input-size=1572864, isDMCMMExtractor=1, durationUs=60139682, csd-0=java.nio.HeapByteBuffer[pos=0 lim=2 cap=2], sample-rate=22050}
-11-08 03:22:31.796 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: getMinBufferSize=7120,max_input_size=1572864,mAudioInputBufSize=28480
-11-08 03:22:31.805 2902-2975/? E/prepared...: &&&&&&& onPrepared()
-11-08 03:22:31.814 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= start:
-11-08 03:22:31.816 2902-2975/? E/setMediaPlayer: @@@@@@@@@@@
-11-08 03:22:31.838 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= processPrepared
-11-08 03:22:31.838 2902-2902/? E/MediaPlayer: error (-38, 0)
-11-08 03:22:31.839 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= handleStart
-11-08 03:22:31.839 2902-2902/? E/======> Controller:: mWindowManager = android.view.WindowManagerImpl@f32457c
-11-08 03:22:31.840 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_start_video for track - 1
-11-08 03:22:31.840 2902-2902/? E/======> Controller:: mDecor = cs5248.team10.dashplayer.Player.TTCMediaController{e22588b VFE...... .F....I. 0,0-0,0}
-11-08 03:22:31.841 2902-2902/? E/======> Controller:: mDecorLayoutParams = WM.LayoutParams{(0,1080)(1920xwrap) gr=#30 ty=1000 fl=#820020 fmt=-3 naviIconColor=0}
-11-08 03:22:31.857 2902-2902/? E/MediaPlayer: Error (-38,0)
-11-08 03:22:31.898 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_start_video:codec started
-11-08 03:22:31.906 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_start_audio for track - 0
-11-08 03:22:31.962 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_start_audio:codec started
-11-08 03:22:31.966 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= AudioOutputBufSize:32768
-11-08 03:22:31.967 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= processPlaying
-11-08 03:22:31.968 2902-3060/? E/TTCMoviePlayer:TTCMoviePlayer: ======= mVideoTask:run
-11-08 03:22:31.968 2902-3061/? E/TTCMoviePlayer:TTCMoviePlayer: ======= mAudioTask:run
-11-08 03:22:31.972 2902-2975/? E/TTCMoviePlayer:TTCMoviePlayer: ======= handleLoop
-11-08 03:22:31.975 2902-3060/? E/TTCMoviePlayer:TTCMoviePlayer: ======= INFO_OUTPUT_BUFFERS_CHANGED:
-11-08 03:22:31.986 2902-3061/? E/TTCMoviePlayer:TTCMoviePlayer: ======= INFO_OUTPUT_BUFFERS_CHANGED:
-11-08 03:22:32.002 2902-3061/? E/TTCMoviePlayer:TTCMoviePlayer: ======= audio decoder output format changed: {pcm-encoding=2, mime=audio/raw, channel-count=2, sample-rate=22050}
-11-08 03:22:32.076 2902-3060/? E/TTCMoviePlayer:TTCMoviePlayer: ======= video decoder output format changed: {crop-top=0, crop-right=639, color-format=261, height=368, max_capacity=17694720, color-standard=4, crop-left=0, color-transfer=3, stride=640, mime=video/raw, slice-height=368, remained_resource=17464320, width=640, color-range=2, crop-bottom=359}
-11-08 03:22:34.873 2902-2902/cs5248.team10.dashplayer E/ViewRootImpl: sendUserActionEvent() mView == null
-     */
-
-
-
-
-    /*
-    11-08 03:23:31.727 2902-3060/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= sent input EOS:android.media.MediaCodec@ab04357
-11-08 03:23:31.749 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= processPlaying
-11-08 03:23:31.754 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= handleLoop
-11-08 03:23:32.033 2902-3061/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= sent input EOS:android.media.MediaCodec@38bbdf3
-11-08 03:23:32.038 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= processPlaying
-11-08 03:23:32.044 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= handleLoop
-11-08 03:23:32.046 2902-3060/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= video:output EOS
-11-08 03:23:32.049 2902-3060/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= VideoTask:finished
-11-08 03:23:32.053 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= processPlaying
-11-08 03:23:32.068 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= handleLoop
-11-08 03:23:32.143 2902-3061/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= audio:output EOS
-11-08 03:23:32.147 2902-3061/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= AudioTask:finished
-11-08 03:23:32.148 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= Reached EOS, looping check
-11-08 03:23:32.152 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= handleStop:
-11-08 03:23:32.162 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_stop_video:
-11-08 03:23:32.164 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_stop_audio:
-11-08 03:23:32.213 2902-2975/cs5248.team10.dashplayer E/done..: &&&&&&& onFinished() with counter == 0
-11-08 03:23:32.215 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= prepare:
-11-08 03:23:32.217 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= processStop with req ==> 1
-11-08 03:23:32.218 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= handlePrepare:/storage/emulated/0/ttcVideo/big_buck_bunny.mp4
-11-08 03:23:32.225 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= updateMovieInfo
-11-08 03:23:32.232 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_prepare_video
-11-08 03:23:32.269 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:: ======= selectTrack:
-11-08 03:23:32.274 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:: Extractor selected track 1 (video/avc): {csd-1=java.nio.HeapByteBuffer[pos=0 lim=8 cap=8], mime=video/avc, frame-rate=24, track-id=2, profile=1, width=640, height=360, max-input-size=1572864, isDMCMMExtractor=1, durationUs=60095000, csd-0=java.nio.HeapByteBuffer[pos=0 lim=25 cap=25], level=256}
-11-08 03:23:32.279 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: format:size(640,360),duration=60095000,bps=733076,framerate=0.000000,rotation=0
-11-08 03:23:32.281 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_prepare_audio
-11-08 03:23:32.330 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:: ======= selectTrack:
-11-08 03:23:32.333 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:: Extractor selected track 0 (audio/mp4a-latm): {aac-profile=2, mime=audio/mp4a-latm, channel-count=2, track-id=1, profile=2, bitrate=64000, max-input-size=1572864, isDMCMMExtractor=1, durationUs=60139682, csd-0=java.nio.HeapByteBuffer[pos=0 lim=2 cap=2], sample-rate=22050}
-11-08 03:23:32.340 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: getMinBufferSize=7120,max_input_size=1572864,mAudioInputBufSize=28480
-11-08 03:23:32.365 2902-2975/cs5248.team10.dashplayer E/prepared...: &&&&&&& onPrepared()
-11-08 03:23:32.369 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= start:
-11-08 03:23:32.372 2902-2975/cs5248.team10.dashplayer E/setMediaPlayer: @@@@@@@@@@@
-11-08 03:23:32.407 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= processPrepared
-11-08 03:23:32.409 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= handleStart
-11-08 03:23:32.410 2902-2902/cs5248.team10.dashplayer E/======> Controller:: mWindowManager = android.view.WindowManagerImpl@f32457c
-11-08 03:23:32.413 2902-2902/cs5248.team10.dashplayer E/======> Controller:: mDecor = cs5248.team10.dashplayer.Player.TTCMediaController{e22588b VFE...... .F....ID 0,0-1920,264}
-11-08 03:23:32.412 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_start_video for track - 1
-11-08 03:23:32.415 2902-2902/cs5248.team10.dashplayer E/======> Controller:: mDecorLayoutParams = WM.LayoutParams{(0,1080)(1920xwrap) gr=#30 ty=1000 fl=#1820020 fmt=-3 naviIconColor=0}
-11-08 03:23:32.485 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_start_video:codec started
-11-08 03:23:32.488 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_start_audio for track - 0
-11-08 03:23:32.526 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= internal_start_audio:codec started
-11-08 03:23:32.528 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= AudioOutputBufSize:32768
-11-08 03:23:32.530 2902-5652/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= mVideoTask:run
-11-08 03:23:32.530 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= processPlaying
-11-08 03:23:32.531 2902-5653/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= mAudioTask:run
-11-08 03:23:32.534 2902-2975/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= handleLoop
-11-08 03:23:32.536 2902-5652/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= INFO_OUTPUT_BUFFERS_CHANGED:
-11-08 03:23:32.546 2902-5653/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= INFO_OUTPUT_BUFFERS_CHANGED:
-11-08 03:23:32.560 2902-5653/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= audio decoder output format changed: {pcm-encoding=2, mime=audio/raw, channel-count=2, sample-rate=22050}
-11-08 03:23:32.640 2902-5652/cs5248.team10.dashplayer E/TTCMoviePlayer:TTCMoviePlayer: ======= video decoder output format changed: {crop-top=0, crop-right=639, color-format=261, height=368, max_capacity=17694720, color-standard=4, crop-left=0, color-transfer=3, stride=640, mime=video/raw, slice-height=368, remained_resource=17464320, width=640, color-range=2, crop-bottom=359}
-11-08 03:23:35.470 2902-2902/cs5248.team10.dashplayer E/ViewRootImpl: sendUserActionEvent() mView == null
-     */
 }
