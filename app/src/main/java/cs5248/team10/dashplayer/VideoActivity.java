@@ -41,9 +41,8 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.Window;
 import android.view.WindowManager;
-import android.widget.FrameLayout;
 
-import java.io.File;
+import java.util.ArrayList;
 
 import cs5248.team10.dashplayer.Player.FrameCallback;
 import cs5248.team10.dashplayer.Player.TTCMediaController;
@@ -51,6 +50,8 @@ import cs5248.team10.dashplayer.Player.TTCMoviePlayer;
 
 public class VideoActivity extends AppCompatActivity implements SurfaceHolder.Callback, TTCMediaController.MediaPlayerControl
 {
+    private ArrayList<String> segmentNames = new ArrayList<>();
+
     private TTCMoviePlayer mPlayer = null;
     private TTCMediaController mController;
 
@@ -58,7 +59,7 @@ public class VideoActivity extends AppCompatActivity implements SurfaceHolder.Ca
 
     private String CURR_POSITION = "curr_position";
 
-    private int counter = 0;
+    private int counter = 1;
 
     private int playToPosition = 0;
 
@@ -74,6 +75,8 @@ public class VideoActivity extends AppCompatActivity implements SurfaceHolder.Ca
 //    private String SAMPLE = "http://monterosa.d2.comp.nus.edu.sg/~team10/server/upload/test1/high/output003.mp4";
 
     private String SAMPLE = Environment.getExternalStorageDirectory() + "/ttcVideo/MVCAU_20171015_165316/VIDEO_20171015_165329.mp4";
+
+    private String savePath = Environment.getExternalStorageDirectory() + "/ttcVideo/";
 
     //private String SAMPLE = ((File)((File)Environment.getExternalStorageDirectory()).listFiles()[7]).listFiles()[0].getAbsolutePath();
     // Storage Permissions
@@ -107,9 +110,10 @@ public class VideoActivity extends AppCompatActivity implements SurfaceHolder.Ca
         {
             // TODO: src should be a list of file path
             // assume list format is 0=foldername, 1 onwards= filename
-            String src = extras.getString("src");
-            SAMPLE = src;
-            Log.wtf("getintent", "intent not null => " + src);
+            savePath = savePath + extras.getString("folder") + "/";
+            segmentNames = extras.getStringArrayList("files");
+//            SAMPLE = src;
+            Log.wtf("getintent", "intent not null => " + savePath);
         }
 
         SurfaceView surfaceView = (SurfaceView) findViewById(R.id.surfaceView);
@@ -152,9 +156,7 @@ public class VideoActivity extends AppCompatActivity implements SurfaceHolder.Ca
             mSurface = surfaceHolder.getSurface();
 
             mPlayer = new TTCMoviePlayer(mSurface, mFrameCallback);
-            // TODO: there should be a list of src, on create play 2nd
-            // assume list format is 0=foldername, 1 onwards= filename
-            mPlayer.prepare(SAMPLE);
+            mPlayer.prepare(savePath + segmentNames.get(0));
 
             //            mController = new TTCMediaController(this);
 //            mController.setMediaPlayer(mPlayer);
@@ -235,13 +237,11 @@ public class VideoActivity extends AppCompatActivity implements SurfaceHolder.Ca
         {
             Log.wtf("done.. ", "&&&&&&& onFinished() with counter == " + counter);
 
-            // try loop playing?
-            if (counter++ < 4)
+            if (counter < segmentNames.size())
             {
                 mPlayer = null;
                 mPlayer = new TTCMoviePlayer(mSurface, mFrameCallback);
-                // TODO: change repeat loop to loop the src list
-                mPlayer.prepare(SAMPLE);
+                mPlayer.prepare(savePath + segmentNames.get(counter++));
             }
             else
             {

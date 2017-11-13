@@ -1,5 +1,6 @@
 package cs5248.team10.dashplayer.AsyncTask;
 
+import android.content.Context;
 import android.os.AsyncTask;
 import android.os.Environment;
 import android.util.Log;
@@ -17,6 +18,8 @@ import java.net.URL;
 
 public class MP4DownloaderTask extends AsyncTask<String, Void, Void>
 {
+    private String folderName;
+
     private float prevBandwidth = 0.0f;
     private float prevPrevBandwidth = 0.0f;
 
@@ -67,28 +70,32 @@ public class MP4DownloaderTask extends AsyncTask<String, Void, Void>
 
 //    private String TEST = "http://monterosa.d2.comp.nus.edu.sg/~team10/server/upload/test1/high/output003.mp4";
 
-    protected Void doInBackground(String... mFileName)
+    public MP4DownloaderTask(String folderName)
     {
-        if (mFileName.length < 2)
+        this.folderName = folderName;
+    }
+
+    protected Void doInBackground(String... mSegmentName)
+    {
+        if (mSegmentName.length < 1)
         {
-            Log.wtf("MP4DownloaderTask", "doInBackground for mFilename < 2 => " + mFileName.length);
+            Log.wtf("MP4DownloaderTask", "doInBackground for mFilename < 1 => " + mSegmentName.length);
             return null;
         }
 
         // check directory exist
-        String folderName = mFileName[0];
-        File saveFolder = checkAndCreateDir(savePath + mFileName[0] + "/");
+        File saveFolder = checkAndCreateDir(savePath + folderName + "/");
 
-        for (int i = 1; i < mFileName.length; i++)
+        for (int i = 0; i < mSegmentName.length; i++)
         {
             // start first download task with median resolution
-            if (i == 1)
+            if (i == 0)
             {
-                prevPrevBandwidth = downloadFile(saveFolder, mFileName[i], folderName, prevThreshold);
+                prevPrevBandwidth = downloadFile(saveFolder, mSegmentName[i], folderName, prevThreshold);
             }
-            else if (i == 2)
+            else if (i == 1)
             {
-                prevBandwidth = downloadFile(saveFolder, mFileName[i], folderName, prevThreshold);
+                prevBandwidth = downloadFile(saveFolder, mSegmentName[i], folderName, prevThreshold);
             }
             // subsequent downloads
             else
@@ -116,7 +123,7 @@ Log.wtf("bandwidths", "prevPrevBandwidth: " + prevPrevBandwidth + " prevBandwidt
                     }
                 }
                 prevPrevBandwidth = prevBandwidth;
-                prevBandwidth = downloadFile(saveFolder, mFileName[i], folderName, prevThreshold);
+                prevBandwidth = downloadFile(saveFolder, mSegmentName[i], folderName, prevThreshold);
             }
         }
 
@@ -148,13 +155,16 @@ Log.wtf("bandwidths", "prevPrevBandwidth: " + prevPrevBandwidth + " prevBandwidt
                 saveFile.createNewFile();
             }
 
+            Log.wtf("downloadFile", "downloading -> " + fileName);
+
             // file output stream
             FileOutputStream fos = new FileOutputStream(saveFile);
 
             long startTime = System.currentTimeMillis();
 
             // input stream from connection
-            URL url = new URL(dwlPath + folderName + threshold + fileName);
+            Log.wtf("downloadFile", "download path = " + dwlPath + folderName + "/" + threshold + fileName);
+            URL url = new URL(dwlPath + folderName + "/" + threshold + fileName);
             InputStream is = url.openConnection().getInputStream();
 
             //Set buffer type

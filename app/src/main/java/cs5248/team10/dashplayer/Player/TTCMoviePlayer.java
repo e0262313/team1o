@@ -24,6 +24,7 @@ import android.media.MediaFormat;
 import android.media.MediaMetadataRetriever;
 import android.media.MediaPlayer;
 import android.os.Environment;
+import android.os.Handler;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.Surface;
@@ -640,7 +641,8 @@ public class TTCMoviePlayer extends MediaPlayer
      * @param source_file
      * @throws IOException
      */
-    private boolean isInternalFile(final String source_file){
+    private boolean isInternalFile(final String source_file)
+    {
         File file = new File(source_file);
 
         try
@@ -653,7 +655,7 @@ public class TTCMoviePlayer extends MediaPlayer
         return true;
     }
 
-    private final void handlePrepare(final String source_file) throws IOException
+    private final void handlePrepare(final String source_file)
     {
         if (isLogging) Log.wtf(TAG, "======= handlePrepare:" + source_file);
         synchronized (mSync)
@@ -669,29 +671,51 @@ public class TTCMoviePlayer extends MediaPlayer
 
 
         // TODO: check if source_file exist, if not to wait and re-try
-        // if video is downloaded to phone
-        if(isInternalFile(source_file))
-        {
-            File file = new File(source_file);
 
-            FileInputStream fileInputStream;
-            try
+        if(!isInternalFile(source_file))
+        {
+            final Handler handler = new Handler();
+            handler.postDelayed(new Runnable()
             {
-                fileInputStream = new FileInputStream(file);
-            }
-            catch (FileNotFoundException e) {
-                throw new FileNotFoundException("Stream: Unable to read " + file.getPath() + " | exist?: "
-                        + file.exists() + " or isFile?: " + file.isFile() + " or canRead?: " + file.canRead());
-            }
+                @Override
+                public void run()
+                {
+                    // Do something after 1s = 1000ms
+                    // if video is downloaded to phone
+Log.wtf("isInternalFile", "delaying 1s to try again...");
+                    if(isInternalFile(source_file))
+                    {
+                        File file = new File(source_file);
 
-            // mMetadata.setDataSource(source_file, new HashMap<String, String>());
-            mMetadata.setDataSource(fileInputStream.getFD());
-            fileInputStream.close();
-        }
-        // if video is from internet
-        else
-        {
-            mMetadata.setDataSource(source_file, new HashMap<String, String>());
+                        FileInputStream fileInputStream = null;
+                        try
+                        {
+                            fileInputStream = new FileInputStream(file);
+                        }
+                        catch (FileNotFoundException e)
+                        {
+                            Log.wtf("FileNotFoundException", "Stream: Unable to read " + file.getPath() + " | exist?: "
+                                    + file.exists() + " or isFile?: " + file.isFile() + " or canRead?: " + file.canRead());
+                        }
+
+                        try
+                        {
+                            // mMetadata.setDataSource(source_file, new HashMap<String, String>());
+                            mMetadata.setDataSource(fileInputStream.getFD());
+                            fileInputStream.close();
+                        }
+                        catch (IOException e)
+                        {
+                            e.printStackTrace();
+                        }
+                    }
+                    // if video is from internet
+                    else
+                    {
+                        mMetadata.setDataSource(source_file, new HashMap<String, String>());
+                    }
+                }
+            }, 1000);
         }
 
         updateMovieInfo();
