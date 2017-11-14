@@ -112,6 +112,7 @@ public class VideoActivity extends AppCompatActivity implements SurfaceHolder.Ca
             // assume list format is 0=foldername, 1 onwards= filename
             savePath = savePath + extras.getString("folder") + "/";
             segmentNames = extras.getStringArrayList("files");
+Log.wtf("segment count", ">>>> size: " + segmentNames.size());
 //            SAMPLE = src;
             Log.wtf("getintent", "intent not null => " + savePath);
         }
@@ -156,7 +157,15 @@ public class VideoActivity extends AppCompatActivity implements SurfaceHolder.Ca
             mSurface = surfaceHolder.getSurface();
 
             mPlayer = new TTCMoviePlayer(mSurface, mFrameCallback);
-            mPlayer.prepare(savePath + segmentNames.get(0));
+            new Handler(getMainLooper()).postDelayed(new Runnable()
+            {
+                @Override
+                public void run()
+                {
+                    mPlayer.prepare(savePath + segmentNames.get(0));
+                }
+            }, 50);
+
 
             //            mController = new TTCMediaController(this);
 //            mController.setMediaPlayer(mPlayer);
@@ -241,10 +250,18 @@ public class VideoActivity extends AppCompatActivity implements SurfaceHolder.Ca
             {
                 mPlayer = null;
                 mPlayer = new TTCMoviePlayer(mSurface, mFrameCallback);
+                new Handler(getMainLooper()).postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
                 mPlayer.prepare(savePath + segmentNames.get(counter++));
+                    }
+                }, 50);
+
+
             }
             else
             {
+
                 mPlayer = null;
 //                mController.hide();
             }
@@ -253,6 +270,7 @@ public class VideoActivity extends AppCompatActivity implements SurfaceHolder.Ca
         @Override
         public boolean onFrameAvailable(long presentationTimeUs)
         {
+//Log.wtf("onFrameAvailable", "time = " + presentationTimeUs);
             return false;
         }
     };

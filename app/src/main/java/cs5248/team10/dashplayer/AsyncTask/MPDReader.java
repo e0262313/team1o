@@ -3,6 +3,7 @@ package cs5248.team10.dashplayer.AsyncTask;
 import android.content.Context;
 import android.content.Intent;
 import android.os.AsyncTask;
+import android.os.SystemClock;
 import android.util.Log;
 
 import org.xmlpull.v1.XmlPullParser;
@@ -121,6 +122,9 @@ public class MPDReader extends AsyncTask<String, Void, Void>
         // start downloading
         String[] pathList =  segmentNames.toArray(new String[0]);
         new MP4DownloaderTask(folderName).execute(pathList);
+
+        // slight delay for download before starting video
+        SystemClock.sleep(100);
 
         // start video
         Intent intent = new Intent(context.getApplicationContext(), VideoActivity.class);

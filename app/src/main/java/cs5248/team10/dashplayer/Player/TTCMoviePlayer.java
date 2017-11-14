@@ -12,9 +12,7 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.HashMap;
 
-import android.content.Context;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
@@ -23,8 +21,9 @@ import android.media.MediaExtractor;
 import android.media.MediaFormat;
 import android.media.MediaMetadataRetriever;
 import android.media.MediaPlayer;
-import android.os.Environment;
+import android.os.AsyncTask;
 import android.os.Handler;
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.Surface;
@@ -113,7 +112,8 @@ public class TTCMoviePlayer extends MediaPlayer
     private AudioTrack mAudioTrack;
     private int mPercentage;
 
-    public TTCMoviePlayer(final Surface outputSurface, final FrameCallback callback) throws NullPointerException
+    public TTCMoviePlayer(final Surface outputSurface,
+                          final FrameCallback callback) throws NullPointerException
     {
         if (isLogging) Log.wtf(TAG, "======= Constructor:");
         if ((outputSurface == null) || (callback == null))
@@ -183,16 +183,23 @@ public class TTCMoviePlayer extends MediaPlayer
         return mAudioSampleRate;
     }
 
+    public final int getCurrentPosition()
+    {
+        return (int) mVideoStartTime;
+    }
+
     public final boolean hasAudio()
     {
         return mHasAudio;
     }
 
-    public int getBufferPercentage() {
+    public int getBufferPercentage()
+    {
         return mPercentage;
     }
 
-    public boolean canPause() {
+    public boolean canPause()
+    {
         return mCanPause;
     }
 
@@ -208,11 +215,12 @@ public class TTCMoviePlayer extends MediaPlayer
     /**
      * Prepare to start the video
      * Set the source and notify everyone
+     *
      * @param src_movie - the movie source
      */
     public final void prepare(final String src_movie)
     {
-        if (isLogging) Log.wtf(TAG, "======= prepare:");
+        if (isLogging) Log.wtf(TAG, "======= prepare: " + src_movie);
         synchronized (mSync)
         {
             mSourcePath = src_movie;
@@ -387,18 +395,6 @@ public class TTCMoviePlayer extends MediaPlayer
             }
         }
     };
-
-
-//11-05 23:27:55.756 18178-19364/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= handleInputVideo
-//11-05 23:27:55.716 18178-19364/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= internal_process_input:presentationTimeUs=8208333
-//        11-05 23:27:55.717 18178-19364/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= handleOutputVideo:
-//        11-05 23:27:55.722 18178-19364/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= adjustPresentationTime
-//11-05 23:27:55.737 18178-19365/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= handleInputAudio
-//11-05 23:27:55.738 18178-19365/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= internal_process_input:presentationTimeUs=8080544
-//        11-05 23:27:55.741 18178-19365/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= handleOutputAudio:
-//        11-05 23:27:55.744 18178-19365/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= internal_write_audio
-//11-05 23:27:55.745 18178-19365/cs5248.team10.dashplayer D/TTCMoviePlayer:TTCMoviePlayer: ======= adjustPresentationTime
-
 
     //--------------------------------------------------------------------------------
     /**
@@ -641,7 +637,7 @@ public class TTCMoviePlayer extends MediaPlayer
      * @param source_file
      * @throws IOException
      */
-    private boolean isInternalFile(final String source_file)
+    private boolean fileExist(final String source_file)
     {
         File file = new File(source_file);
 
@@ -649,7 +645,8 @@ public class TTCMoviePlayer extends MediaPlayer
         {
             new FileInputStream(file);
         }
-        catch (FileNotFoundException e) {
+        catch (FileNotFoundException e)
+        {
             return false;
         }
         return true;
@@ -670,53 +667,59 @@ public class TTCMoviePlayer extends MediaPlayer
         mMetadata = new MediaMetadataRetriever();
 
 
-        // TODO: check if source_file exist, if not to wait and re-try
-
-        if(!isInternalFile(source_file))
+        // check if source_file exist, if not to wait and re-try
+        while (!fileExist(source_file))
         {
-            final Handler handler = new Handler();
-            handler.postDelayed(new Runnable()
-            {
-                @Override
-                public void run()
-                {
-                    // Do something after 1s = 1000ms
-                    // if video is downloaded to phone
-Log.wtf("isInternalFile", "delaying 1s to try again...");
-                    if(isInternalFile(source_file))
-                    {
-                        File file = new File(source_file);
-
-                        FileInputStream fileInputStream = null;
-                        try
-                        {
-                            fileInputStream = new FileInputStream(file);
-                        }
-                        catch (FileNotFoundException e)
-                        {
-                            Log.wtf("FileNotFoundException", "Stream: Unable to read " + file.getPath() + " | exist?: "
-                                    + file.exists() + " or isFile?: " + file.isFile() + " or canRead?: " + file.canRead());
-                        }
-
-                        try
-                        {
-                            // mMetadata.setDataSource(source_file, new HashMap<String, String>());
-                            mMetadata.setDataSource(fileInputStream.getFD());
-                            fileInputStream.close();
-                        }
-                        catch (IOException e)
-                        {
-                            e.printStackTrace();
-                        }
-                    }
-                    // if video is from internet
-                    else
-                    {
-                        mMetadata.setDataSource(source_file, new HashMap<String, String>());
-                    }
-                }
-            }, 1000);
+            Log.wtf("wait","xxxxx file does not exist to wait -> " + source_file);
+            SystemClock.sleep(10);
         }
+
+        File file = new File(source_file);
+
+        FileInputStream fileInputStream = null;
+        try
+        {
+            fileInputStream = new FileInputStream(file);
+        }
+        catch (FileNotFoundException e)
+        {
+            Log.wtf("FileNotFoundException", "Stream: Unable to read " + file.getPath() + " | exist?: " + file.exists() + " or isFile?: " + file.isFile() + " or canRead?: " + file.canRead());
+        }
+
+        try
+        {
+            // mMetadata.setDataSource(source_file, new HashMap<String, String>());
+            mMetadata.setDataSource(fileInputStream.getFD());
+            fileInputStream.close();
+        }
+        catch (IOException e)
+        {
+            e.printStackTrace();
+        }
+
+//        if(!fileExist(source_file))
+//        {
+//            final Handler handler = new Handler();
+//            handler.postDelayed(new Runnable()
+//            {
+//                @Override
+//                public void run()
+//                {
+//                    // Do something after 1s = 1000ms
+//                    // if video is downloaded to phone
+//Log.wtf("fileExist", "delaying 1s to try again...");
+//                    if(fileExist(source_file))
+//                    {
+//
+//                    }
+////                    // if video is from internet
+////                    else
+////                    {
+////                        mMetadata.setDataSource(source_file, new HashMap<String, String>());
+////                    }
+//                }
+//            }, 1000);
+//        }
 
         updateMovieInfo();
         // preparation for video playback
@@ -1004,7 +1007,8 @@ Log.wtf("isInternalFile", "delaying 1s to try again...");
                                              final ByteBuffer[] inputBuffers,
                                              final long presentationTimeUs)
     {
-        if (isLogging) Log.d(TAG, "======= internal_process_input:presentationTimeUs=" + presentationTimeUs);
+        if (isLogging)
+            Log.d(TAG, "======= internal_process_input:presentationTimeUs=" + presentationTimeUs);
         boolean result = true;
         while (mIsRunning)
         {
@@ -1075,7 +1079,8 @@ Log.wtf("isInternalFile", "delaying 1s to try again...");
             else if (decoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED)
             {
                 final MediaFormat newFormat = mVideoMediaCodec.getOutputFormat();
-                if (isLogging) Log.wtf(TAG, "======= video decoder output format changed: " + newFormat);
+                if (isLogging)
+                    Log.wtf(TAG, "======= video decoder output format changed: " + newFormat);
             }
             else if (decoderStatus < 0)
             {
@@ -1171,7 +1176,8 @@ Log.wtf("isInternalFile", "delaying 1s to try again...");
             else if (decoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED)
             {
                 final MediaFormat newFormat = mAudioMediaCodec.getOutputFormat();
-                if (isLogging) Log.wtf(TAG, "======= audio decoder output format changed: " + newFormat);
+                if (isLogging)
+                    Log.wtf(TAG, "======= audio decoder output format changed: " + newFormat);
             }
             else if (decoderStatus < 0)
             {
@@ -1205,8 +1211,7 @@ Log.wtf("isInternalFile", "delaying 1s to try again...");
      * @param size
      * @return ignored
      */
-    protected void internal_write_audio(final ByteBuffer buffer, final int offset,
-                                        final int size)
+    protected void internal_write_audio(final ByteBuffer buffer, final int offset, final int size)
     {
         if (isLogging) Log.d(TAG, "======= internal_write_audio");
         if (mAudioOutTempBuf.length < size)
@@ -1230,7 +1235,8 @@ Log.wtf("isInternalFile", "delaying 1s to try again...");
     protected long adjustPresentationTime(final Object sync, final long startTime,
                                           final long presentationTimeUs)
     {
-        if (isLogging) Log.d(TAG, "======= adjustPresentationTime | start time = " + startTime + " and presentationTimeUs = " + presentationTimeUs);
+        if (isLogging)
+            Log.d(TAG, "======= adjustPresentationTime | start time = " + startTime + " and presentationTimeUs = " + presentationTimeUs);
         if (startTime > 0)
         {
             for (long t = presentationTimeUs - (System.nanoTime() / 1000 - startTime); t > 0; t = presentationTimeUs - (System.nanoTime() / 1000 - startTime))
@@ -1257,6 +1263,9 @@ Log.wtf("isInternalFile", "delaying 1s to try again...");
 
     private final void handleStop()
     {
+        // callback to get the next video
+        mCallback.onFinished();
+
         if (isLogging) Log.wtf(TAG, "======= handleStop:");
         synchronized (mVideoTask)
         {
@@ -1267,6 +1276,11 @@ Log.wtf("isInternalFile", "delaying 1s to try again...");
         {
             internal_stop_audio();
             mAudioTrackIndex = -1;
+        }
+        synchronized (mSync)
+        {
+            mVideoOutputDone = mVideoInputDone = mAudioOutputDone = mAudioInputDone = true;
+            mState = STATE_STOP;
         }
         if (mVideoMediaCodec != null)
         {
@@ -1298,12 +1312,8 @@ Log.wtf("isInternalFile", "delaying 1s to try again...");
             mMetadata.release();
             mMetadata = null;
         }
-        synchronized (mSync)
-        {
-            mVideoOutputDone = mVideoInputDone = mAudioOutputDone = mAudioInputDone = true;
-            mState = STATE_STOP;
-        }
-        mCallback.onFinished();
+
+//        SystemClock.sleep(1000);
     }
 
     protected void internal_stop_video()
@@ -1338,7 +1348,8 @@ Log.wtf("isInternalFile", "delaying 1s to try again...");
         if (isLogging) Log.wtf(TAG, "======= handleResume:");
         synchronized (mSync)
         {
-            if (mState != STATE_PAUSED) throw new RuntimeException("invalid state to resume: " + mState);
+            if (mState != STATE_PAUSED)
+                throw new RuntimeException("invalid state to resume: " + mState);
             mState = STATE_PLAYING;
         }
     }

@@ -31,7 +31,7 @@ public class MP4DownloaderTask extends AsyncTask<String, Void, Void>
 //    private String MEDIAN = "median/";
 //    private String LOW = "low/";
 
-    public static enum Thresholds
+    public enum Thresholds
     {
         LOW ("low/"),
         MEDIAN ("median/"),
