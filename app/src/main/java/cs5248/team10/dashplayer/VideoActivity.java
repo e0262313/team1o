@@ -45,6 +45,7 @@ import android.view.WindowManager;
 import java.util.ArrayList;
 
 import cs5248.team10.dashplayer.Player.FrameCallback;
+import cs5248.team10.dashplayer.Player.MPlayer;
 import cs5248.team10.dashplayer.Player.TTCMediaController;
 import cs5248.team10.dashplayer.Player.TTCMoviePlayer;
 
@@ -52,7 +53,9 @@ public class VideoActivity extends AppCompatActivity implements SurfaceHolder.Ca
 {
     private ArrayList<String> segmentNames = new ArrayList<>();
 
-    private TTCMoviePlayer mPlayer = null;
+//    private MPlayer mainPlayer = null;
+    private TTCMoviePlayer mainPlayer = null;
+
     private TTCMediaController mController;
 
     private Handler handler = new Handler();
@@ -112,7 +115,7 @@ public class VideoActivity extends AppCompatActivity implements SurfaceHolder.Ca
             // assume list format is 0=foldername, 1 onwards= filename
             savePath = savePath + extras.getString("folder") + "/";
             segmentNames = extras.getStringArrayList("files");
-Log.wtf("segment count", ">>>> size: " + segmentNames.size());
+            Log.wtf("segment count", ">>>> size: " + segmentNames.size());
 //            SAMPLE = src;
             Log.wtf("getintent", "intent not null => " + savePath);
         }
@@ -152,23 +155,25 @@ Log.wtf("segment count", ">>>> size: " + segmentNames.size());
     public void surfaceCreated(SurfaceHolder surfaceHolder)
     {
         Log.wtf("Main --", "surfaceCreated");
-        if (mPlayer == null)
+        if (mainPlayer == null)
         {
             mSurface = surfaceHolder.getSurface();
 
-            mPlayer = new TTCMoviePlayer(mSurface, mFrameCallback);
+//            mainPlayer = new MPlayer(mSurface, mFrameCallback);
+            mainPlayer = new TTCMoviePlayer(mSurface, mFrameCallback);
+
             new Handler(getMainLooper()).postDelayed(new Runnable()
             {
                 @Override
                 public void run()
                 {
-                    mPlayer.prepare(savePath + segmentNames.get(0));
+                    mainPlayer.prepare(savePath + segmentNames.get(0));
                 }
-            }, 50);
+            }, 1000);
 
 
             //            mController = new TTCMediaController(this);
-//            mController.setMediaPlayer(mPlayer);
+//            mController.setMediaPlayer(mainPlayer);
 ////            mController.setAnchorView(findViewById(R.id.surfaceView));
 //            mController.setAnchorView((FrameLayout) findViewById(R.id.videoSurfaceContainer));
             Log.wtf("surfaceCreated", "<<<<<<<< setup mplayer and mController");
@@ -179,19 +184,19 @@ Log.wtf("segment count", ">>>> size: " + segmentNames.size());
     public void surfaceChanged(SurfaceHolder surfaceHolder, int i, int i1, int i2)
     {
         Log.wtf("Main --", "surfaceChanged");
-//        if (mPlayer != null)
+//        if (mainPlayer != null)
 //        {
-//            mPlayer.prepare(SAMPLE);
+//            mainPlayer.prepare(SAMPLE);
 //        }
     }
 
     @Override
     public void surfaceDestroyed(SurfaceHolder surfaceHolder)
     {
-        if (mPlayer != null)
+        if (mainPlayer != null)
         {
-            mPlayer.end();
-            mPlayer = null;
+            mainPlayer.end();
+            mainPlayer = null;
         }
     }
 
@@ -218,51 +223,54 @@ Log.wtf("segment count", ">>>> size: " + segmentNames.size());
         public void onPrepared()
         {
             Log.wtf("prepared... ", "&&&&&&& onPrepared()");
-            if (mPlayer == null)
+            if (mainPlayer == null)
             {
-                Log.wtf("callback... ", "Why is mPlayer null???");
+                Log.wtf("callback... ", "Why is mainPlayer null???");
                 return;
             }
 
-            mPlayer.start();
+            // start the player
+            mainPlayer.start();
 
-            handler.post(new Runnable()
-            {
-                public void run()
-                {
-                    // TODO: check if looping before setting this
-                    if (counter == 0)
-                    {
-                        //mController.setEnabled(true);
-                        //mController.show();
-                    }
-                }
-            });
+
+//            handler.post(new Runnable()
+//            {
+//                public void run()
+//                {
+//                    // TODO: check if looping before setting this
+//                    if (counter == 0)
+//                    {
+//                        //mController.setEnabled(true);
+//                        //mController.show();
+//                    }
+//                }
+//            });
 
         }
 
         @Override
         public void onFinished()
         {
-            Log.wtf("done.. ", "&&&&&&& onFinished() with counter == " + counter);
-
             if (counter < segmentNames.size())
             {
-                mPlayer = null;
-                mPlayer = new TTCMoviePlayer(mSurface, mFrameCallback);
-                new Handler(getMainLooper()).postDelayed(new Runnable() {
+                mainPlayer = null;
+//                mainPlayer = new MPlayer(mSurface, mFrameCallback);
+                mainPlayer = new TTCMoviePlayer(mSurface, mFrameCallback);
+                new Handler(getMainLooper()).postDelayed(new Runnable()
+                {
                     @Override
-                    public void run() {
-                mPlayer.prepare(savePath + segmentNames.get(counter++));
+                    public void run()
+                    {
+                        mainPlayer.prepare(savePath + segmentNames.get(counter++));
                     }
-                }, 50);
+                }, 500);
 
 
             }
             else
             {
 
-                mPlayer = null;
+                mainPlayer = null;
 //                mController.hide();
             }
         }
@@ -280,33 +288,33 @@ Log.wtf("segment count", ">>>> size: " + segmentNames.size());
     public void start()
     {
         Log.wtf("MediaCTR ==> ", " start button!!");
-        mPlayer.start();
+        mainPlayer.start();
     }
 
     public void pause()
     {
-        mPlayer.pause();
+        mainPlayer.pause();
     }
 
     public int getDuration()
     {
-        return mPlayer.getDuration();
+        return mainPlayer.getDuration();
     }
 
     public int getCurrentPosition()
     {
-        return mPlayer.getCurrentPosition();
+        return mainPlayer.getCurrentPosition();
     }
 
     public void seekTo(int i)
     {
         Log.wtf("seekTo", "i = " + i);
-        mPlayer.seekTo(i);
+        mainPlayer.seekTo(i);
     }
 
     public boolean isPlaying()
     {
-        return mPlayer.isPlaying();
+        return mainPlayer.isPlaying();
     }
 
     public int getBufferPercentage()

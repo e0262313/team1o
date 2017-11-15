@@ -447,7 +447,7 @@ public class TTCMoviePlayer extends MediaPlayer
         @Override
         public void run()
         {
-            if (isLogging) Log.wtf(TAG, "======= mAudioTask:run");
+            if (isLogging) Log.d(TAG, "======= mAudioTask:run");
             for (; mIsRunning && !mAudioInputDone && !mAudioOutputDone; )
             {
                 try
@@ -647,6 +647,7 @@ public class TTCMoviePlayer extends MediaPlayer
         }
         catch (FileNotFoundException e)
         {
+Log.wtf("fileExist", "FileNotFoundException");
             return false;
         }
         return true;
@@ -697,31 +698,7 @@ public class TTCMoviePlayer extends MediaPlayer
             e.printStackTrace();
         }
 
-//        if(!fileExist(source_file))
-//        {
-//            final Handler handler = new Handler();
-//            handler.postDelayed(new Runnable()
-//            {
-//                @Override
-//                public void run()
-//                {
-//                    // Do something after 1s = 1000ms
-//                    // if video is downloaded to phone
-//Log.wtf("fileExist", "delaying 1s to try again...");
-//                    if(fileExist(source_file))
-//                    {
-//
-//                    }
-////                    // if video is from internet
-////                    else
-////                    {
-////                        mMetadata.setDataSource(source_file, new HashMap<String, String>());
-////                    }
-//                }
-//            }, 1000);
-//        }
-
-        updateMovieInfo();
+//        updateMovieInfo();
         // preparation for video playback
         mVideoTrackIndex = internal_prepare_video(source_file);
         // preparation for audio playback
@@ -823,6 +800,7 @@ public class TTCMoviePlayer extends MediaPlayer
         mDuration = 0L;
         mFrameRate = 0;
         String value = mMetadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH);
+Log.wtf("updateMovieInfo", "value: " + value);
         if (!TextUtils.isEmpty(value))
         {
             mVideoWidth = Integer.parseInt(value);
@@ -979,7 +957,7 @@ public class TTCMoviePlayer extends MediaPlayer
 
     private final void handleLoop()
     {
-        if (isLogging) Log.wtf(TAG, "======= handleLoop");
+        if (isLogging) Log.d(TAG, "======= handleLoop");
         synchronized (mSync)
         {
             try
@@ -1194,7 +1172,7 @@ public class TTCMoviePlayer extends MediaPlayer
                 mAudioMediaCodec.releaseOutputBuffer(decoderStatus, false);
                 if ((mAudioBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0)
                 {
-                    if (isLogging) Log.wtf(TAG, "======= audio:output EOS");
+                    if (isLogging) Log.d(TAG, "======= audio:output EOS");
                     synchronized (mSync)
                     {
                         mAudioOutputDone = true;
@@ -1263,9 +1241,6 @@ public class TTCMoviePlayer extends MediaPlayer
 
     private final void handleStop()
     {
-        // callback to get the next video
-        mCallback.onFinished();
-
         if (isLogging) Log.wtf(TAG, "======= handleStop:");
         synchronized (mVideoTask)
         {
@@ -1314,6 +1289,9 @@ public class TTCMoviePlayer extends MediaPlayer
         }
 
 //        SystemClock.sleep(1000);
+
+        // callback to get the next video
+        mCallback.onFinished();
     }
 
     protected void internal_stop_video()
